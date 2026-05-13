@@ -1,0 +1,8 @@
+# docker/docker-compose.yml
+#
+# Phase 3 will add the `postgres` service here.
+# Phase 6 will add the `keycloak` service here.
+#
+# For Phase 0 there are no containers to run — the API is a single Go binary.
+
+services: {}

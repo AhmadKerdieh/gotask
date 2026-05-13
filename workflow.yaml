@@ -1,0 +1,19 @@
+# workflow.yaml
+#
+# Declares the legal vocabulary for tasks. Loaded at startup by
+# internal/config.LoadWorkflow (a separate Viper instance from app config,
+# so you can hot-reload this file independently in a later phase).
+#
+# Wired up in Phase 2 — for now this file simply documents the intended shape.
+
+statuses:
+  - todo
+  - in_progress
+  - in_review
+  - done
+
+priorities:
+  - low
+  - medium
+  - high
+  - critical
