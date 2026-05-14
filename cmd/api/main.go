@@ -1,6 +1,10 @@
 // Package main is the entry point for the gotask API server.
-// It wires configuration, the logger, and all HTTP routes, then runs the
-// server with graceful shutdown on SIGINT/SIGTERM.
+//
+// Its only job is to wire dependencies and run the server with graceful
+// shutdown. All routing and middleware lives in internal/server; all
+// configuration loading lives in internal/config; etc. This separation
+// means integration tests can build the same router without running this
+// binary, and `main` stays small enough to read at a glance.
 package main
 
 import (
@@ -13,8 +17,8 @@ import (
 	"time"
 
 	"gotask/internal/config"
+	"gotask/internal/server"
 	"gotask/pkg/logger"
-	"gotask/pkg/response"
 )
 
 func main() {
@@ -22,33 +26,22 @@ func main() {
 	// no logger yet, so we fall back to stderr via the standard library.
 	cfg, err := config.Load()
 	if err != nil {
-		// Using os.Stderr directly because the logger depends on cfg.
 		_, _ = os.Stderr.WriteString("config: " + err.Error() + "\n")
 		os.Exit(1)
 	}
 
 	log := logger.New(cfg.Env, cfg.LogLevel)
 
-	mux := http.NewServeMux()
-
-	// Health check — used by load balancers, container orchestrators, and the
-	// Phase 0 frontend to confirm the server is reachable.
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		response.OK(w, http.StatusOK, map[string]any{
-			"status":  "ok",
-			"service": "gotask",
-			"env":     cfg.Env,
-			"time":    time.Now().UTC().Format(time.RFC3339),
-		})
+	// Build the HTTP handler (router + middleware + routes). Everything
+	// about how requests are processed lives in this one call.
+	handler := server.NewRouter(server.Deps{
+		Config: cfg,
+		Logger: log,
 	})
 
-	// Static frontend (served at "/"). The Go 1.22 mux requires a trailing
-	// slash on the pattern for prefix matching.
-	mux.Handle("GET /", http.FileServer(http.Dir(cfg.StaticDir)))
-
-	server := &http.Server{
+	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
@@ -60,11 +53,12 @@ func main() {
 	serverErr := make(chan error, 1)
 	go func() {
 		log.Info("server starting",
-			"addr", server.Addr,
+			"addr", srv.Addr,
 			"env", cfg.Env,
-			"static_dir", cfg.StaticDir,
+			"request_timeout", cfg.RequestTimeout.String(),
+			"cors_allowed_origins", cfg.CORSAllowedOrigins,
 		)
-		serverErr <- server.ListenAndServe()
+		serverErr <- srv.ListenAndServe()
 	}()
 
 	// Wait for either a startup error or an OS shutdown signal.
@@ -84,9 +78,9 @@ func main() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		if err := server.Shutdown(ctx); err != nil {
+		if err := srv.Shutdown(ctx); err != nil {
 			log.Error("graceful shutdown failed; forcing close", "error", err)
-			_ = server.Close()
+			_ = srv.Close()
 			os.Exit(1)
 		}
 		log.Info("shutdown complete")

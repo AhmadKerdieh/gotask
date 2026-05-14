@@ -20,13 +20,12 @@
       --accent: #c9f56b;
       --accent-2: #66e6a3;
       --red: #ff8a73;
+      --amber: #ffd16b;
       --serif: "Fraunces", ui-serif, Georgia, serif;
       --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
     }
-
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
-
     body {
       background: var(--bg);
       color: var(--ink);
@@ -38,217 +37,135 @@
         radial-gradient(1200px 600px at 80% -10%, rgba(201, 245, 107, 0.06), transparent 60%),
         radial-gradient(900px 500px at -10% 110%, rgba(102, 230, 163, 0.05), transparent 60%);
     }
+    .shell { max-width: 920px; margin: 0 auto; padding: 56px 28px 80px; }
 
-    .shell {
-      max-width: 880px;
-      margin: 0 auto;
-      padding: 56px 28px 80px;
-    }
-
-    /* Header */
     header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 56px; }
-    .brand {
-      font-family: var(--serif);
-      font-weight: 800;
-      font-size: 38px;
-      letter-spacing: -0.02em;
-      line-height: 1;
-    }
+    .brand { font-family: var(--serif); font-weight: 800; font-size: 38px; letter-spacing: -0.02em; line-height: 1; }
     .brand .dot { color: var(--accent); }
     .meta { font-size: 11px; color: var(--ink-3); letter-spacing: 0.08em; text-transform: uppercase; }
     .meta b { color: var(--ink); font-weight: 500; }
 
-    /* Tagline */
-    .tagline {
-      font-family: var(--serif);
-      font-size: 28px;
-      line-height: 1.25;
-      color: var(--ink);
-      letter-spacing: -0.01em;
-      max-width: 600px;
-      margin: 0 0 8px;
-    }
+    .tagline { font-family: var(--serif); font-size: 28px; line-height: 1.25; color: var(--ink); letter-spacing: -0.01em; max-width: 600px; margin: 0 0 8px; }
     .tagline em { color: var(--accent); font-style: normal; }
-    .sub { color: var(--ink-2); margin: 0 0 40px; font-size: 13px; }
+    .sub { color: var(--ink-2); margin: 0 0 36px; font-size: 13px; }
+    .sub code { font-family: var(--mono); color: var(--ink); background: var(--bg-2); padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); }
 
-    /* Status card */
+    /* Cards */
     .card {
       border: 1px solid var(--line);
       background: linear-gradient(180deg, var(--panel), var(--bg-2));
       border-radius: 14px;
       overflow: hidden;
+      margin-bottom: 20px;
     }
     .card-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 14px 18px;
-      border-bottom: 1px solid var(--line);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px; border-bottom: 1px solid var(--line);
       background: rgba(255, 255, 255, 0.015);
     }
-    .card-head .label {
-      font-size: 11px;
-      color: var(--ink-3);
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-    }
+    .card-head .label { font-size: 11px; color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; }
+    .card-body { padding: 16px 18px; }
+
     .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 5px 12px 5px 10px;
-      border-radius: 999px;
-      font-size: 12px;
-      letter-spacing: 0.04em;
-      background: var(--bg-2);
-      color: var(--ink-2);
-      border: 1px solid var(--line-2);
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 5px 12px 5px 10px; border-radius: 999px;
+      font-size: 12px; letter-spacing: 0.04em;
+      background: var(--bg-2); color: var(--ink-2); border: 1px solid var(--line-2);
     }
-    .pill::before {
-      content: "";
-      width: 7px; height: 7px; border-radius: 50%;
-      background: var(--ink-3);
-    }
+    .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); }
     .pill.ok { color: #0e0f0d; background: var(--accent); border-color: transparent; }
     .pill.ok::before { background: #0e0f0d; }
     .pill.err { color: var(--red); border-color: rgba(255, 138, 115, 0.4); }
     .pill.err::before { background: var(--red); }
+    .pill.warn { color: var(--amber); border-color: rgba(255, 209, 107, 0.4); }
+    .pill.warn::before { background: var(--amber); }
     .pill.loading::before { animation: pulse 1.1s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.15); } }
 
-    @keyframes pulse {
-      0%, 100% { opacity: 0.35; transform: scale(0.85); }
-      50%      { opacity: 1;    transform: scale(1.15); }
-    }
-
-    .kv {
-      display: grid;
-      grid-template-columns: 130px 1fr;
-      gap: 0;
-    }
-    .kv > div {
-      padding: 12px 18px;
-      border-bottom: 1px solid var(--line);
-    }
+    .kv { display: grid; grid-template-columns: 130px 1fr; gap: 0; }
+    .kv > div { padding: 10px 18px; border-bottom: 1px solid var(--line); }
     .kv > div:nth-last-child(-n+2) { border-bottom: 0; }
     .kv .k { color: var(--ink-3); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
     .kv .v { color: var(--ink); }
     .kv .v.muted { color: var(--ink-2); }
-    .kv .v code {
-      font-family: var(--mono);
-      background: var(--bg);
-      padding: 2px 8px;
-      border-radius: 6px;
-      border: 1px solid var(--line);
-      font-size: 12.5px;
-    }
+    .kv .v code { font-family: var(--mono); background: var(--bg); padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); font-size: 12.5px; }
 
-    /* Response block */
-    .raw {
-      margin: 20px 0 0;
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      overflow: hidden;
-    }
-    .raw-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 10px 16px;
-      background: rgba(255, 255, 255, 0.015);
-      border-bottom: 1px solid var(--line);
-    }
-    .raw-head span { font-size: 11px; color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; }
+    /* Buttons */
     .btn {
-      font-family: var(--mono);
-      font-size: 12px;
-      color: var(--ink);
-      background: transparent;
-      border: 1px solid var(--line-2);
-      padding: 5px 12px;
-      border-radius: 8px;
-      cursor: pointer;
+      font-family: var(--mono); font-size: 12px; color: var(--ink);
+      background: transparent; border: 1px solid var(--line-2);
+      padding: 7px 14px; border-radius: 8px; cursor: pointer;
       transition: border-color 0.15s, color 0.15s, background 0.15s;
     }
     .btn:hover { border-color: var(--accent); color: var(--accent); }
     .btn:active { transform: translateY(1px); }
+    .btn.danger:hover { border-color: var(--red); color: var(--red); }
+    .btn.warn:hover { border-color: var(--amber); color: var(--amber); }
+    .btn.tiny { padding: 4px 10px; font-size: 11px; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+    .button-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+
+    select.select {
+      font-family: var(--mono); font-size: 12px; color: var(--ink);
+      background: var(--bg-2); border: 1px solid var(--line-2);
+      padding: 6px 12px; border-radius: 8px;
+    }
+
+    /* Raw response */
     pre.raw-body {
-      margin: 0;
-      padding: 16px 18px;
-      font-family: var(--mono);
-      font-size: 12.5px;
-      color: var(--ink);
-      overflow-x: auto;
-      background: var(--bg);
-      min-height: 60px;
+      margin: 0; padding: 16px 18px; font-family: var(--mono); font-size: 12.5px;
+      color: var(--ink); overflow-x: auto; background: var(--bg); min-height: 60px;
     }
     .raw-body .k { color: var(--accent-2); }
     .raw-body .s { color: var(--accent); }
-    .raw-body .n { color: #ffd16b; }
-    .raw-body .b { color: #ffd16b; }
+    .raw-body .n { color: var(--amber); }
+    .raw-body .b { color: var(--amber); }
+
+    /* Request log table */
+    table.log {
+      width: 100%; border-collapse: collapse; font-size: 12px;
+    }
+    table.log th {
+      text-align: left; padding: 8px 14px; color: var(--ink-3);
+      letter-spacing: 0.1em; text-transform: uppercase; font-size: 10px;
+      font-weight: 500; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, 0.015);
+    }
+    table.log td {
+      padding: 8px 14px; border-bottom: 1px solid var(--line); color: var(--ink-2);
+      font-family: var(--mono); white-space: nowrap;
+    }
+    table.log td:nth-child(5) { white-space: normal; word-break: break-all; }
+    table.log tr:last-child td { border-bottom: 0; }
+    .status-2xx { color: var(--accent-2); }
+    .status-4xx { color: var(--amber); }
+    .status-5xx { color: var(--red); }
+    .status-x { color: var(--ink-3); }
+    .empty { padding: 20px 18px; color: var(--ink-3); font-size: 12px; text-align: center; }
 
     /* Phase tracker */
-    .phases {
-      margin-top: 56px;
-    }
-    .phases h2 {
-      font-family: var(--serif);
-      font-weight: 600;
-      font-size: 16px;
-      color: var(--ink-2);
-      letter-spacing: 0.02em;
-      margin: 0 0 14px;
-    }
+    .phases { margin-top: 48px; }
+    .phases h2 { font-family: var(--serif); font-weight: 600; font-size: 16px; color: var(--ink-2); letter-spacing: 0.02em; margin: 0 0 14px; }
     .phase-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-    .phase-list li {
-      display: grid;
-      grid-template-columns: 30px 1fr auto;
-      align-items: center;
-      gap: 14px;
-      padding: 10px 14px;
-      border: 1px solid transparent;
-      border-radius: 10px;
-      font-size: 13px;
-    }
-    .phase-list li .num {
-      font-family: var(--mono);
-      color: var(--ink-3);
-      font-size: 11px;
-    }
+    .phase-list li { display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 14px; padding: 10px 14px; border: 1px solid transparent; border-radius: 10px; font-size: 13px; }
+    .phase-list li .num { font-family: var(--mono); color: var(--ink-3); font-size: 11px; }
     .phase-list li .name { color: var(--ink-2); }
-    .phase-list li .tag {
-      font-size: 10px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--ink-3);
-    }
-    .phase-list li.current {
-      border-color: var(--line-2);
-      background: rgba(201, 245, 107, 0.04);
-    }
-    .phase-list li.current .num,
-    .phase-list li.current .name { color: var(--ink); }
+    .phase-list li .tag { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+    .phase-list li.current { border-color: var(--line-2); background: rgba(201, 245, 107, 0.04); }
+    .phase-list li.current .num, .phase-list li.current .name { color: var(--ink); }
     .phase-list li.current .name { font-weight: 500; }
     .phase-list li.current .tag { color: var(--accent); }
     .phase-list li.done .name { color: var(--ink-3); text-decoration: line-through; text-decoration-color: var(--line-2); }
     .phase-list li.done .tag { color: var(--accent-2); }
 
-    footer {
-      margin-top: 60px;
-      padding-top: 24px;
-      border-top: 1px solid var(--line);
-      color: var(--ink-3);
-      font-size: 11px;
-      letter-spacing: 0.06em;
-      display: flex;
-      justify-content: space-between;
-    }
+    footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 11px; letter-spacing: 0.06em; display: flex; justify-content: space-between; }
 
     @media (max-width: 540px) {
       .shell { padding: 32px 18px 60px; }
       .brand { font-size: 30px; }
       .tagline { font-size: 22px; }
       .kv { grid-template-columns: 100px 1fr; }
+      table.log td:nth-child(4) { display: none; }
     }
   </style>
 </head>
@@ -256,44 +173,106 @@
   <div class="shell">
     <header>
       <div class="brand">gotask<span class="dot">.</span></div>
-      <div class="meta">phase <b>00</b> · setup</div>
+      <div class="meta">phase <b>01</b> · http layer</div>
     </header>
 
     <p class="tagline">A minimal task tracker, <em>built from scratch</em> as a course in production Go.</p>
-    <p class="sub">This page is the live diagnostic for the API. It refreshes <code style="font-family:var(--mono);color:var(--ink);background:var(--bg-2);padding:1px 6px;border-radius:4px;border:1px solid var(--line)">GET /health</code> against the server you just started.</p>
+    <p class="sub">Phase&nbsp;01 wires up <code>chi</code>, a middleware chain (RequestID, AccessLog, Recover, CORS, Timeout), and a typed error model. API routes now live under <code>/api/v1/</code>.</p>
 
+    <!-- Health card -->
     <section class="card">
       <div class="card-head">
         <span class="label">server health</span>
         <span id="status-pill" class="pill loading">checking…</span>
       </div>
       <div class="kv">
-        <div class="k">endpoint</div><div class="v"><code>GET /health</code></div>
+        <div class="k">endpoint</div><div class="v"><code>GET /api/v1/health</code></div>
         <div class="k">latency</div><div class="v muted" id="latency">—</div>
+        <div class="k">request id</div><div class="v muted" id="req-id">—</div>
         <div class="k">service</div><div class="v muted" id="service">—</div>
-        <div class="k">env</div>    <div class="v muted" id="env">—</div>
+        <div class="k">env</div><div class="v muted" id="env">—</div>
         <div class="k">server time</div><div class="v muted" id="time">—</div>
       </div>
     </section>
 
-    <div class="raw">
-      <div class="raw-head">
-        <span>raw response</span>
-        <button class="btn" id="retry">refresh</button>
+    <!-- Phase 1 middleware test panel -->
+    <section class="card">
+      <div class="card-head">
+        <span class="label">middleware probes — phase 01</span>
+        <button class="btn tiny" id="clear-log">clear log</button>
+      </div>
+      <div class="card-body">
+        <p style="color:var(--ink-2); font-size:12.5px; margin:0 0 14px;">
+          Each button hits a development-only endpoint to exercise one piece of
+          the middleware stack. Every response carries an <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">X-Request-ID</code> header you can correlate with the server logs.
+        </p>
+        <div class="button-grid">
+          <button class="btn"        data-probe="health">health</button>
+          <button class="btn"        data-probe="404">404 unknown route</button>
+          <button class="btn warn"   data-probe="405">405 wrong method</button>
+          <button class="btn danger" data-probe="panic">panic → 500</button>
+          <button class="btn warn"   data-probe="slow">slow → 504 (waits 16s)</button>
+          <select class="select" id="error-kind">
+            <option value="bad_request">bad_request</option>
+            <option value="unauthorized">unauthorized</option>
+            <option value="forbidden">forbidden</option>
+            <option value="not_found">not_found</option>
+            <option value="conflict">conflict</option>
+            <option value="validation">validation</option>
+            <option value="timeout">timeout</option>
+            <option value="internal">internal</option>
+          </select>
+          <button class="btn" data-probe="error">trigger error</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Request log -->
+    <section class="card">
+      <div class="card-head">
+        <span class="label">request log (newest first)</span>
+        <span class="pill" id="log-count">0</span>
+      </div>
+      <table class="log" id="log-table">
+        <thead>
+          <tr>
+            <th style="width:80px">time</th>
+            <th style="width:60px">method</th>
+            <th>path</th>
+            <th style="width:60px">status</th>
+            <th style="width:240px">request id</th>
+            <th style="width:80px">latency</th>
+          </tr>
+        </thead>
+        <tbody id="log-body">
+          <tr><td colspan="6" class="empty">no requests yet — click a button above</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Raw response -->
+    <section class="card">
+      <div class="card-head">
+        <span class="label">last response · raw body</span>
+        <span class="pill" id="last-status">—</span>
       </div>
       <pre class="raw-body" id="raw">—</pre>
-    </div>
+    </section>
 
     <section class="phases">
       <h2>course progress</h2>
       <ul class="phase-list">
-        <li class="current">
+        <li class="done">
           <span class="num">00</span>
           <span class="name">Scaffold, config, logger, response envelope, health</span>
+          <span class="tag">complete</span>
+        </li>
+        <li class="current">
+          <span class="num">01</span>
+          <span class="name">HTTP routing (chi), middleware stack, typed errors</span>
           <span class="tag">in progress</span>
         </li>
-        <li><span class="num">01</span><span class="name">HTTP routing, middleware, error model</span><span class="tag">next</span></li>
-        <li><span class="num">02</span><span class="name">Domain models &amp; validation (workflow.yaml)</span><span class="tag"></span></li>
+        <li><span class="num">02</span><span class="name">Domain models &amp; validation (workflow.yaml)</span><span class="tag">next</span></li>
         <li><span class="num">03</span><span class="name">Postgres, migrations, repositories</span><span class="tag"></span></li>
         <li><span class="num">04</span><span class="name">Service layer, DI, unit tests with mocks</span><span class="tag"></span></li>
         <li><span class="num">05</span><span class="name">Tasks REST API + integration tests</span><span class="tag"></span></li>
@@ -306,19 +285,19 @@
     </section>
 
     <footer>
-      <span>gotask · go 1.22+</span>
-      <span id="build-stamp">phase 00</span>
+      <span>gotask · go 1.22+ · chi v5</span>
+      <span>phase 01</span>
     </footer>
   </div>
 
   <script>
     const $ = (id) => document.getElementById(id);
-    const pill = $("status-pill");
-    const raw  = $("raw");
+    const API = "/api/v1";
 
+    // Lightweight JSON syntax highlighting.
     function highlight(json) {
-      // Lightweight syntax highlighting — keys, strings, numbers, booleans.
-      return JSON.stringify(json, null, 2)
+      const s = typeof json === "string" ? json : JSON.stringify(json, null, 2);
+      return s
         .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
         .replace(/"([^"\\]*(?:\\.[^"\\]*)*)"(\s*:)/g, '<span class="k">"$1"</span>$2')
         .replace(/:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g, ': <span class="s">"$1"</span>')
@@ -326,39 +305,113 @@
         .replace(/:\s*(true|false|null)/g, ': <span class="b">$1</span>');
     }
 
-    async function check() {
-      pill.className = "pill loading";
-      pill.textContent = "checking…";
-      raw.textContent = "—";
+    // Request log state — kept in memory only.
+    const logEntries = [];
+    function addLogEntry(entry) {
+      logEntries.unshift(entry);
+      if (logEntries.length > 20) logEntries.length = 20;
+      renderLog();
+    }
+    function renderLog() {
+      const tb = $("log-body");
+      $("log-count").textContent = String(logEntries.length);
+      if (logEntries.length === 0) {
+        tb.innerHTML = '<tr><td colspan="6" class="empty">no requests yet — click a button above</td></tr>';
+        return;
+      }
+      tb.innerHTML = logEntries.map(e => {
+        const cls = e.status >= 500 ? "status-5xx"
+                  : e.status >= 400 ? "status-4xx"
+                  : e.status >= 200 ? "status-2xx"
+                  : "status-x";
+        const id = e.requestId ? e.requestId : "—";
+        return `<tr>
+          <td>${e.time}</td>
+          <td>${e.method}</td>
+          <td>${e.path}</td>
+          <td class="${cls}">${e.status || "—"}</td>
+          <td title="${id}">${id}</td>
+          <td>${e.latency} ms</td>
+        </tr>`;
+      }).join("");
+    }
+    $("clear-log").addEventListener("click", () => { logEntries.length = 0; renderLog(); });
 
+    // Central fetch wrapper: times the request, logs it, updates the raw panel.
+    async function call(method, path, label) {
       const started = performance.now();
+      const time = new Date().toTimeString().slice(0, 8);
+      let status = 0, requestId = "", body = "(no body)";
+
       try {
-        const res  = await fetch("/health", { cache: "no-store" });
-        const json = await res.json();
-        const ms   = Math.round(performance.now() - started);
+        const res = await fetch(path, { method, cache: "no-store" });
+        status = res.status;
+        requestId = res.headers.get("x-request-id") || "";
 
-        raw.innerHTML = highlight(json);
-
-        if (res.ok && json.success) {
-          pill.className = "pill ok";
-          pill.textContent = "healthy";
-          $("latency").textContent = ms + " ms";
-          $("service").textContent = json.data?.service ?? "—";
-          $("env").textContent     = json.data?.env ?? "—";
-          $("time").textContent    = json.data?.time ?? "—";
-        } else {
-          pill.className = "pill err";
-          pill.textContent = "unhealthy";
-        }
+        const text = await res.text();
+        try { body = JSON.parse(text); } catch { body = text || "(empty)"; }
       } catch (e) {
-        pill.className = "pill err";
-        pill.textContent = "offline";
-        raw.textContent = String(e);
+        body = String(e);
+      }
+
+      const latency = Math.round(performance.now() - started);
+      addLogEntry({ time, method, path, status, requestId, latency });
+
+      $("raw").innerHTML = highlight(body);
+      const pill = $("last-status");
+      pill.textContent = status ? `${method} ${status}` : `${method} ERR`;
+      pill.className = "pill " + (status >= 500 ? "err" : status >= 400 ? "warn" : status >= 200 ? "ok" : "err");
+
+      return { status, requestId, body };
+    }
+
+    // The dedicated health refresh updates the top card.
+    async function refreshHealth() {
+      $("status-pill").className = "pill loading";
+      $("status-pill").textContent = "checking…";
+
+      const r = await call("GET", `${API}/health`, "health");
+
+      if (r.status === 200 && r.body && r.body.success) {
+        $("status-pill").className = "pill ok";
+        $("status-pill").textContent = "healthy";
+        $("latency").textContent = (logEntries[0]?.latency ?? "—") + " ms";
+        $("req-id").textContent = r.requestId || "—";
+        $("service").textContent = r.body.data?.service ?? "—";
+        $("env").textContent = r.body.data?.env ?? "—";
+        $("time").textContent = r.body.data?.time ?? "—";
+      } else {
+        $("status-pill").className = "pill err";
+        $("status-pill").textContent = r.status === 0 ? "offline" : "unhealthy";
       }
     }
 
-    $("retry").addEventListener("click", check);
-    check();
+    // Probe dispatcher.
+    document.querySelectorAll("[data-probe]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const probe = btn.getAttribute("data-probe");
+        btn.disabled = true;
+        try {
+          switch (probe) {
+            case "health": await refreshHealth(); break;
+            case "404":    await call("GET",  `${API}/this-route-does-not-exist`); break;
+            case "405":    await call("POST", `${API}/health`); break;
+            case "panic":  await call("GET",  `${API}/debug/panic`); break;
+            case "slow":   await call("GET",  `${API}/debug/slow?ms=16000`); break;
+            case "error": {
+              const kind = $("error-kind").value;
+              await call("GET", `${API}/debug/error/${kind}`);
+              break;
+            }
+          }
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+
+    // Initial health check on load.
+    refreshHealth();
   </script>
 </body>
 </html>

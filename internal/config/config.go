@@ -7,7 +7,9 @@ package config
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/mitchellh/mapstructure"
 	"github.com/spf13/viper"
 )
 
@@ -20,6 +22,19 @@ type Config struct {
 	Port      string `mapstructure:"PORT"`
 	LogLevel  string `mapstructure:"LOG_LEVEL"`
 	StaticDir string `mapstructure:"STATIC_DIR"`
+
+	// Phase 1 additions.
+	//
+	// CORSAllowedOrigins is a comma-separated list in the .env file, e.g.
+	//   CORS_ALLOWED_ORIGINS=http://localhost:8080,http://localhost:5173
+	// Viper's StringToSliceHookFunc splits it into []string at unmarshal
+	// time. Strict allowlist — there is no "allow all" mode.
+	CORSAllowedOrigins []string `mapstructure:"CORS_ALLOWED_ORIGINS"`
+
+	// RequestTimeout is the per-request deadline applied by the timeout
+	// middleware. Format: any string time.ParseDuration accepts ("15s",
+	// "200ms", "1m"). StringToTimeDurationHookFunc decodes it.
+	RequestTimeout time.Duration `mapstructure:"REQUEST_TIMEOUT"`
 }
 
 // Load reads the .env file (if present) and overlays environment variables,
@@ -34,11 +49,10 @@ func Load() (*Config, error) {
 	v.SetDefault("PORT", "8080")
 	v.SetDefault("LOG_LEVEL", "info")
 	v.SetDefault("STATIC_DIR", "./static")
+	v.SetDefault("CORS_ALLOWED_ORIGINS", "http://localhost:8080")
+	v.SetDefault("REQUEST_TIMEOUT", "15s")
 
-	// .env file lookup. AddConfigPath calls are searched in order; we add
-	// the project root and a couple of common alternates so the binary
-	// works whether you `go run ./cmd/api` from the repo root or run a
-	// compiled binary from inside ./cmd/api.
+	// .env file lookup.
 	v.SetConfigName(".env")
 	v.SetConfigType("env")
 	v.AddConfigPath(".")
@@ -53,14 +67,24 @@ func Load() (*Config, error) {
 		}
 	}
 
-	// Environment variable handling. AutomaticEnv binds any env var whose
-	// name matches a known key. The key replacer lets users write
-	// `LOG_LEVEL=debug` rather than the literal `log.level`.
+	// Bind environment variables. AutomaticEnv binds any env var whose name
+	// matches a known key. The replacer lets users write `LOG_LEVEL=debug`
+	// rather than the literal `log.level`.
 	v.AutomaticEnv()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	var cfg Config
-	if err := v.Unmarshal(&cfg); err != nil {
+
+	// Decode hooks teach mapstructure how to convert string inputs (which is
+	// what every env var is) into richer Go types:
+	//   - StringToTimeDurationHookFunc:  "15s" → time.Duration
+	//   - StringToSliceHookFunc(","):    "a,b,c" → []string{"a","b","c"}
+	hooks := mapstructure.ComposeDecodeHookFunc(
+		mapstructure.StringToTimeDurationHookFunc(),
+		mapstructure.StringToSliceHookFunc(","),
+	)
+
+	if err := v.Unmarshal(&cfg, viper.DecodeHook(hooks)); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 
@@ -86,6 +110,12 @@ func (c *Config) validate() error {
 		// ok
 	default:
 		return fmt.Errorf("config: ENV %q is not one of development|staging|production|test", c.Env)
+	}
+	if c.RequestTimeout <= 0 {
+		return fmt.Errorf("config: REQUEST_TIMEOUT must be positive, got %s", c.RequestTimeout)
+	}
+	if len(c.CORSAllowedOrigins) == 0 {
+		return fmt.Errorf("config: CORS_ALLOWED_ORIGINS must list at least one origin")
 	}
 	return nil
 }
