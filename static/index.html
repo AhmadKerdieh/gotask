@@ -143,7 +143,45 @@
     .status-x { color: var(--ink-3); }
     .empty { padding: 20px 18px; color: var(--ink-3); font-size: 12px; text-align: center; }
 
-    /* Phase tracker */
+    /* Phase 2: validator playground + workflow viewer */
+    textarea.code-input {
+      width: 100%; min-height: 180px; resize: vertical;
+      background: var(--bg); color: var(--ink); border: 1px solid var(--line-2);
+      border-radius: 8px; padding: 12px; font-family: var(--mono); font-size: 12.5px;
+      line-height: 1.5; tab-size: 2; outline: none;
+    }
+    textarea.code-input:focus { border-color: var(--accent); }
+
+    .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px; border-radius: 999px;
+      font-size: 11.5px; color: var(--ink-2);
+      background: var(--bg); border: 1px solid var(--line-2);
+    }
+    .chip b { color: var(--ink); font-weight: 500; }
+
+    .wf-grid { display: grid; grid-template-columns: 130px 1fr; gap: 0; }
+    .wf-grid > div { padding: 10px 18px; border-bottom: 1px solid var(--line); }
+    .wf-grid > div:nth-last-child(-n+2) { border-bottom: 0; }
+    .wf-grid .k { color: var(--ink-3); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
+
+    .field-errors { margin: 14px 0 0; display: grid; gap: 6px; }
+    .field-err {
+      display: grid; grid-template-columns: 140px 1fr; gap: 14px;
+      padding: 8px 12px; background: rgba(255, 138, 115, 0.06);
+      border: 1px solid rgba(255, 138, 115, 0.2); border-radius: 6px; font-size: 12px;
+    }
+    .field-err .fname { color: var(--red); font-family: var(--mono); }
+    .field-err .fmsg  { color: var(--ink); }
+    .valid-banner {
+      margin: 14px 0 0; padding: 10px 14px;
+      background: rgba(201, 245, 107, 0.08);
+      border: 1px solid rgba(201, 245, 107, 0.25); border-radius: 8px;
+      color: var(--accent); font-size: 12.5px;
+    }
+
+
     .phases { margin-top: 48px; }
     .phases h2 { font-family: var(--serif); font-weight: 600; font-size: 16px; color: var(--ink-2); letter-spacing: 0.02em; margin: 0 0 14px; }
     .phase-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
@@ -173,11 +211,11 @@
   <div class="shell">
     <header>
       <div class="brand">gotask<span class="dot">.</span></div>
-      <div class="meta">phase <b>01</b> · http layer</div>
+      <div class="meta">phase <b>02</b> · domain &amp; validation</div>
     </header>
 
     <p class="tagline">A minimal task tracker, <em>built from scratch</em> as a course in production Go.</p>
-    <p class="sub">Phase&nbsp;01 wires up <code>chi</code>, a middleware chain (RequestID, AccessLog, Recover, CORS, Timeout), and a typed error model. API routes now live under <code>/api/v1/</code>.</p>
+    <p class="sub">Phase&nbsp;02 introduces the domain model (<code>Task</code>, <code>Project</code>, <code>User</code>, <code>Comment</code>), loads the legal vocabulary from <code>workflow.yaml</code>, and wires up <code>go-playground/validator</code> with custom rules that consult the workflow.</p>
 
     <!-- Health card -->
     <section class="card">
@@ -259,6 +297,50 @@
       <pre class="raw-body" id="raw">—</pre>
     </section>
 
+    <!-- Phase 2: workflow viewer -->
+    <section class="card">
+      <div class="card-head">
+        <span class="label">workflow — loaded from workflow.yaml</span>
+        <button class="btn tiny" id="refresh-workflow">refresh</button>
+      </div>
+      <div class="wf-grid" id="wf-grid">
+        <div class="k">statuses</div>      <div class="v"><div class="chip-row" id="wf-statuses">—</div></div>
+        <div class="k">terminal</div>      <div class="v"><div class="chip-row" id="wf-terminal">—</div></div>
+        <div class="k">priorities</div>    <div class="v"><div class="chip-row" id="wf-priorities">—</div></div>
+        <div class="k">defaults</div>      <div class="v"><div class="chip-row" id="wf-defaults">—</div></div>
+        <div class="k">transitions</div>   <div class="v" id="wf-transitions">—</div>
+      </div>
+    </section>
+
+    <!-- Phase 2: validator playground -->
+    <section class="card">
+      <div class="card-head">
+        <span class="label">validator playground — phase 02</span>
+        <span class="pill" id="validator-pill">idle</span>
+      </div>
+      <div class="card-body">
+        <p style="color:var(--ink-2); font-size:12.5px; margin:0 0 12px;">
+          POST to <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">/api/v1/debug/validate</code> with a payload shaped like the future <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">CreateTaskRequest</code>. The server runs it through <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">validator.Struct</code>; you see field-level errors or a parsed echo.
+        </p>
+        <textarea class="code-input" id="validate-body">{
+  "project_id": "5b1a3b1c-0c0e-4a4a-9a9a-1f1f1f1f1f1f",
+  "title": "Wire up auth",
+  "description": "Implement OIDC login with PKCE.",
+  "status": "open",
+  "priority": "high"
+}</textarea>
+        <div class="button-grid" style="margin-top: 12px;">
+          <button class="btn" id="validate-btn">validate</button>
+          <button class="btn tiny" data-preset="valid">load valid example</button>
+          <button class="btn tiny" data-preset="missing">load missing fields</button>
+          <button class="btn tiny" data-preset="bad-enum">load bad status/priority</button>
+          <button class="btn tiny" data-preset="too-long">load oversize title</button>
+          <button class="btn tiny" data-preset="unknown">load unknown field</button>
+        </div>
+        <div id="validate-result"></div>
+      </div>
+    </section>
+
     <section class="phases">
       <h2>course progress</h2>
       <ul class="phase-list">
@@ -267,13 +349,17 @@
           <span class="name">Scaffold, config, logger, response envelope, health</span>
           <span class="tag">complete</span>
         </li>
-        <li class="current">
+        <li class="done">
           <span class="num">01</span>
           <span class="name">HTTP routing (chi), middleware stack, typed errors</span>
+          <span class="tag">complete</span>
+        </li>
+        <li class="current">
+          <span class="num">02</span>
+          <span class="name">Domain models &amp; validation (workflow.yaml)</span>
           <span class="tag">in progress</span>
         </li>
-        <li><span class="num">02</span><span class="name">Domain models &amp; validation (workflow.yaml)</span><span class="tag">next</span></li>
-        <li><span class="num">03</span><span class="name">Postgres, migrations, repositories</span><span class="tag"></span></li>
+        <li><span class="num">03</span><span class="name">Postgres, migrations, repositories</span><span class="tag">next</span></li>
         <li><span class="num">04</span><span class="name">Service layer, DI, unit tests with mocks</span><span class="tag"></span></li>
         <li><span class="num">05</span><span class="name">Tasks REST API + integration tests</span><span class="tag"></span></li>
         <li><span class="num">06</span><span class="name">Keycloak auth (OIDC + PKCE)</span><span class="tag"></span></li>
@@ -286,7 +372,7 @@
 
     <footer>
       <span>gotask · go 1.22+ · chi v5</span>
-      <span>phase 01</span>
+      <span>phase 02</span>
     </footer>
   </div>
 
@@ -410,8 +496,135 @@
       });
     });
 
+    // ── Phase 2: workflow viewer ──────────────────────────────────────
+    async function refreshWorkflow() {
+      const r = await call("GET", `${API}/workflow`);
+      if (r.status !== 200 || !r.body || !r.body.success) return;
+      const d = r.body.data;
+
+      const chips = (arr, kind="") => arr.map(s =>
+        `<span class="chip"><b>${s}</b>${kind ? ` <span style="color:var(--ink-3)">${kind}</span>` : ""}</span>`
+      ).join("");
+
+      $("wf-statuses").innerHTML   = chips(d.statuses || []);
+      $("wf-terminal").innerHTML   = chips(d.terminal_statuses || []) || '<span class="chip" style="color:var(--ink-3)">none</span>';
+      $("wf-priorities").innerHTML = chips(d.priorities || []);
+      $("wf-defaults").innerHTML   = chips([`status: ${d.default_status}`, `priority: ${d.default_priority}`]);
+
+      // Transitions get rendered as a table of "from → [to, to]" rows.
+      const rows = Object.entries(d.transitions || {}).map(([from, to]) => {
+        const toChips = (to && to.length)
+          ? to.map(t => `<span class="chip"><b>${t}</b></span>`).join(" ")
+          : '<span class="chip" style="color:var(--ink-3)">(terminal — no exits)</span>';
+        return `<div style="display:flex; align-items:center; gap:10px; padding:4px 0;">
+          <span class="chip" style="background:var(--bg-2)"><b>${from}</b></span>
+          <span style="color:var(--ink-3)">→</span>
+          <div class="chip-row">${toChips}</div>
+        </div>`;
+      }).join("");
+      $("wf-transitions").innerHTML = rows || "—";
+    }
+    $("refresh-workflow").addEventListener("click", refreshWorkflow);
+
+    // ── Phase 2: validator playground ─────────────────────────────────
+    const presets = {
+      valid: {
+        project_id: "5b1a3b1c-0c0e-4a4a-9a9a-1f1f1f1f1f1f",
+        title: "Wire up auth",
+        description: "Implement OIDC login with PKCE.",
+        status: "open",
+        priority: "high"
+      },
+      missing: {
+        // omit project_id and title; status/priority blank
+        description: "no title, no project — should fail required checks"
+      },
+      "bad-enum": {
+        project_id: "5b1a3b1c-0c0e-4a4a-9a9a-1f1f1f1f1f1f",
+        title: "test",
+        status: "almost_done",        // not in workflow
+        priority: "urgent"            // not in workflow
+      },
+      "too-long": {
+        project_id: "5b1a3b1c-0c0e-4a4a-9a9a-1f1f1f1f1f1f",
+        title: "x".repeat(250),
+        priority: "medium"
+      },
+      unknown: {
+        project_id: "5b1a3b1c-0c0e-4a4a-9a9a-1f1f1f1f1f1f",
+        title: "test",
+        gotcha: "this field doesn't exist on the DTO"
+      }
+    };
+    document.querySelectorAll("[data-preset]").forEach(b => {
+      b.addEventListener("click", () => {
+        const name = b.getAttribute("data-preset");
+        $("validate-body").value = JSON.stringify(presets[name], null, 2);
+        $("validate-result").innerHTML = "";
+      });
+    });
+
+    async function runValidate() {
+      const pill = $("validator-pill");
+      pill.className = "pill loading";
+      pill.textContent = "validating…";
+      $("validate-result").innerHTML = "";
+
+      const raw = $("validate-body").value;
+      // Send the raw text directly so the server sees exactly what the
+      // user typed (including malformed JSON, to exercise the 400 path).
+      const started = performance.now();
+      const time = new Date().toTimeString().slice(0, 8);
+      let status = 0, requestId = "", body = "";
+
+      try {
+        const res = await fetch(`${API}/debug/validate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: raw,
+          cache: "no-store"
+        });
+        status = res.status;
+        requestId = res.headers.get("x-request-id") || "";
+        const text = await res.text();
+        try { body = JSON.parse(text); } catch { body = text; }
+      } catch (e) {
+        body = String(e);
+      }
+
+      const latency = Math.round(performance.now() - started);
+      addLogEntry({ time, method: "POST", path: `${API}/debug/validate`, status, requestId, latency });
+      $("raw").innerHTML = highlight(body);
+      $("last-status").textContent = `POST ${status}`;
+      $("last-status").className = "pill " + (status === 200 ? "ok" : status === 422 ? "warn" : "err");
+
+      // Update the dedicated validator pill + result panel.
+      const result = $("validate-result");
+      if (status === 200 && body && body.success) {
+        pill.className = "pill ok";
+        pill.textContent = "valid";
+        result.innerHTML = `<div class="valid-banner">payload is structurally valid — server echoed it back</div>`;
+      } else if (status === 422 && body && body.error && body.error.fields) {
+        pill.className = "pill warn";
+        pill.textContent = "422 validation failed";
+        const rows = Object.entries(body.error.fields)
+          .map(([f, m]) => `<div class="field-err"><span class="fname">${f}</span><span class="fmsg">${m}</span></div>`)
+          .join("");
+        result.innerHTML = `<div class="field-errors">${rows}</div>`;
+      } else if (status === 400) {
+        pill.className = "pill err";
+        pill.textContent = "400 bad json";
+        result.innerHTML = `<div class="field-errors"><div class="field-err"><span class="fname">body</span><span class="fmsg">${body && body.error ? body.error.message : "could not parse JSON"}</span></div></div>`;
+      } else {
+        pill.className = "pill err";
+        pill.textContent = `error ${status || "—"}`;
+      }
+    }
+    $("validate-btn").addEventListener("click", runValidate);
+
     // Initial health check on load.
     refreshHealth();
+    refreshWorkflow();
   </script>
 </body>
 </html>

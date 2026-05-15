@@ -1,19 +1,54 @@
 # workflow.yaml
 #
-# Declares the legal vocabulary for tasks. Loaded at startup by
-# internal/config.LoadWorkflow (a separate Viper instance from app config,
-# so you can hot-reload this file independently in a later phase).
+# The authoritative declaration of legal task statuses, allowed status
+# transitions, and priorities. Loaded once at startup by config.LoadWorkflow
+# and consulted by the validator at request time.
 #
-# Wired up in Phase 2 — for now this file simply documents the intended shape.
+# This file is product policy expressed as data. Changing it does not
+# require a code change — only a restart (a future phase can hot-reload).
+# Keep the data here in sync with the Status / Priority constants in
+# internal/domain (the Go constants are autocomplete helpers; this YAML
+# is the law).
 
+# Every legal status. The validator rejects any status not in this list.
 statuses:
-  - todo
+  - open
   - in_progress
+  - blocked
   - in_review
   - done
+  - cancelled
 
+# Terminal statuses cannot transition away. Comments may still be added,
+# but the status field is frozen.
+#
+# We list these explicitly rather than inferring "terminal = empty
+# transition list" to make the policy declarative — accidentally emptying
+# a transition list shouldn't silently make a status terminal.
+terminal_statuses:
+  - done
+  - cancelled
+
+# Allowed transitions, as a map from source status to legal destinations.
+# A transition is permitted iff the destination appears in the source's
+# list. Self-transitions (open → open) are never allowed; the validator
+# treats them as no-ops to reject explicitly.
+transitions:
+  open:        [in_progress, cancelled]
+  in_progress: [blocked, in_review, cancelled, open]
+  blocked:     [in_progress, cancelled]
+  in_review:   [in_progress, done, cancelled]
+  done:        []
+  cancelled:   []
+
+# Every legal priority. The validator rejects any priority not in this list.
 priorities:
   - low
   - medium
   - high
   - critical
+
+# Defaults applied by the service layer when a create-task request omits
+# the corresponding field.
+default_status:   open
+default_priority: medium

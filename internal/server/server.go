@@ -13,16 +13,19 @@ import (
 	"gotask/internal/config"
 	"gotask/internal/handler"
 	"gotask/internal/middleware"
+	"gotask/internal/validator"
 	"gotask/pkg/response"
 )
 
 // Deps bundles everything NewRouter needs. As the application grows we add
-// services, repositories, and a validator here. Doing it via a struct
-// (rather than positional arguments) means callers don't have to memorise
-// argument order and adding a new dep is a one-line change.
+// services and repositories here. Doing it via a struct (rather than
+// positional arguments) means callers don't have to memorise argument
+// order and adding a new dep is a one-line change.
 type Deps struct {
-	Config *config.Config
-	Logger *slog.Logger
+	Config    *config.Config
+	Logger    *slog.Logger
+	Workflow  *config.Workflow
+	Validator *validator.Validator
 }
 
 // NewRouter assembles the middleware chain and the route table and returns
@@ -69,9 +72,14 @@ func NewRouter(d Deps) http.Handler {
 		response.Error(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed for this route")
 	})
 
-	// Build the handler bundle. Services and validators will join in later
-	// phases — same construction pattern.
-	h := handler.New(d.Logger, d.Config)
+	// Build the handler bundle. Services and repositories will join in
+	// later phases — same construction pattern.
+	h := handler.New(handler.Deps{
+		Logger:    d.Logger,
+		Config:    d.Config,
+		Workflow:  d.Workflow,
+		Validator: d.Validator,
+	})
 
 	// ── API routes ────────────────────────────────────────────────────
 	// Versioning the API under /api/v1 from day one costs nothing now and
@@ -80,6 +88,12 @@ func NewRouter(d Deps) http.Handler {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", h.Health)
 
+		// Workflow introspection — public, read-only, useful for the
+		// frontend to render dropdowns with the legal statuses /
+		// priorities. Kept under /api/v1 (not /debug) because we'll
+		// likely want this in production too.
+		r.Get("/workflow", h.GetWorkflow)
+
 		// Debug routes only in development. The condition is checked once
 		// at startup; in production these routes simply do not exist.
 		if d.Config.Env == "development" {
@@ -87,6 +101,11 @@ func NewRouter(d Deps) http.Handler {
 				r.Get("/panic", h.DebugPanic)
 				r.Get("/slow", h.DebugSlow)
 				r.Get("/error/{kind}", h.DebugError)
+
+				// Phase 2: exercise the validator from the frontend.
+				// POST a JSON body shaped like CreateTaskRequest;
+				// receive either {valid:true} or the field error map.
+				r.Post("/validate", h.DebugValidate)
 			})
 		}
 	})

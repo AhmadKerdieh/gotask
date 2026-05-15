@@ -66,6 +66,72 @@ REQUEST_TIMEOUT=15s
   in action.
 - Raw response viewer with JSON syntax highlighting.
 
+## Phase 2 — Domain models & validation
+
+- **Domain types** (`internal/domain/`): `Task`, `Project`, `User`,
+  `Comment`. Pure data — no JSON tags, no DB tags, no methods that do
+  I/O. The same struct flows between every layer without coupling them.
+- **Typed status & priority**: `domain.Status` and `domain.Priority` are
+  string aliases with Go constants (`StatusOpen`, `PriorityHigh`, …).
+  The constants give IDE autocomplete and stop you passing a Priority
+  where a Status is expected. **Legality is enforced at runtime**
+  against `workflow.yaml`, not by the compiler.
+- **Workflow loader** (`internal/config/workflow.go`): parses
+  `workflow.yaml` and runs nine internal-consistency checks
+  (terminal_statuses ⊆ statuses, every transition source/destination is
+  a known status, defaults exist, no self-transitions, terminal
+  statuses have no outgoing transitions, …). Exposes `IsStatus`,
+  `IsPriority`, `IsTerminal`, `CanTransition`, `AllowedTransitions`.
+- **Validator** (`internal/validator/validator.go`): wraps
+  `go-playground/validator/v10`. Reads JSON tags via
+  `RegisterTagNameFunc` so errors come back keyed by `title` rather
+  than `Title`. Registers two custom rules (`status`, `priority`) that
+  consult the loaded workflow. Returns a flat `map[string]string`
+  that drops directly into `apperror.Validation()` from Phase 1 — no
+  glue code in handlers.
+- **DTO package** (`internal/handler/dto/`): created as a skeleton.
+  Phase 5 fills it with `CreateTaskRequest`, `TaskResponse`, etc.
+  Today's commit just establishes the boundary: domain types stay
+  free of JSON/validate tags; wire-shape types live here.
+- **New routes**:
+  - `GET /api/v1/workflow` — public, read-only. Returns the loaded
+    workflow as JSON so the frontend can render dropdowns from a
+    single source of truth.
+  - `POST /api/v1/debug/validate` (dev only) — validates a JSON body
+    shaped like the future `CreateTaskRequest`. Frontend has a
+    playground for it.
+
+### New env var
+
+```
+WORKFLOW_PATH=./workflow.yaml
+```
+
+### workflow.yaml shape
+
+```yaml
+statuses:          [open, in_progress, blocked, in_review, done, cancelled]
+terminal_statuses: [done, cancelled]
+transitions:
+  open:        [in_progress, cancelled]
+  in_progress: [blocked, in_review, cancelled, open]
+  # …
+priorities:        [low, medium, high, critical]
+default_status:    open
+default_priority:  medium
+```
+
+Edit this file to change task statuses or transitions; restart to apply.
+(Hot reload is intentionally deferred.)
+
+### What the frontend gains
+
+- Workflow viewer card: chips for statuses, terminal markers, priorities,
+  defaults, plus a `from → [to, to, …]` table for transitions.
+- Validator playground: textarea with five preset payloads
+  (valid / missing fields / bad enum / oversized title / unknown field)
+  and a field-level error display.
+
 ## Run it
 
 ```bash

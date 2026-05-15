@@ -23,21 +23,38 @@ import (
 	"gotask/internal/apperror"
 	"gotask/internal/config"
 	"gotask/internal/middleware"
+	"gotask/internal/validator"
 	"gotask/pkg/response"
 )
 
 // Handler bundles the shared dependencies every HTTP handler needs.
 // Fields are unexported; construct with New.
 type Handler struct {
-	log *slog.Logger
-	cfg *config.Config
+	log       *slog.Logger
+	cfg       *config.Config
+	workflow  *config.Workflow
+	validator *validator.Validator
 }
 
-// New constructs a Handler. Pass it the same dependencies you'd give to a
-// service or repository — handlers, services, and repos all participate in
-// the same dependency graph wired up by main.go.
-func New(log *slog.Logger, cfg *config.Config) *Handler {
-	return &Handler{log: log, cfg: cfg}
+// Deps is the constructor input for Handler. Using a struct (rather than
+// positional arguments) means adding a dependency in a future phase is a
+// one-line change at call sites — we will keep doing this as services
+// and repositories arrive.
+type Deps struct {
+	Logger    *slog.Logger
+	Config    *config.Config
+	Workflow  *config.Workflow
+	Validator *validator.Validator
+}
+
+// New constructs a Handler from the given dependencies.
+func New(d Deps) *Handler {
+	return &Handler{
+		log:       d.Logger,
+		cfg:       d.Config,
+		workflow:  d.Workflow,
+		validator: d.Validator,
+	}
 }
 
 // respondError is the SINGLE point in the codebase that translates an error

@@ -35,6 +35,13 @@ type Config struct {
 	// middleware. Format: any string time.ParseDuration accepts ("15s",
 	// "200ms", "1m"). StringToTimeDurationHookFunc decodes it.
 	RequestTimeout time.Duration `mapstructure:"REQUEST_TIMEOUT"`
+
+	// WorkflowPath is the location of workflow.yaml. Defaults to
+	// ./workflow.yaml so `go run ./cmd/api` from the repo root works
+	// out of the box. In production set this to an absolute path
+	// (e.g. /etc/gotask/workflow.yaml) and ship the file alongside
+	// the binary.
+	WorkflowPath string `mapstructure:"WORKFLOW_PATH"`
 }
 
 // Load reads the .env file (if present) and overlays environment variables,
@@ -51,6 +58,7 @@ func Load() (*Config, error) {
 	v.SetDefault("STATIC_DIR", "./static")
 	v.SetDefault("CORS_ALLOWED_ORIGINS", "http://localhost:8080")
 	v.SetDefault("REQUEST_TIMEOUT", "15s")
+	v.SetDefault("WORKFLOW_PATH", "./workflow.yaml")
 
 	// .env file lookup.
 	v.SetConfigName(".env")
@@ -116,6 +124,9 @@ func (c *Config) validate() error {
 	}
 	if len(c.CORSAllowedOrigins) == 0 {
 		return fmt.Errorf("config: CORS_ALLOWED_ORIGINS must list at least one origin")
+	}
+	if c.WorkflowPath == "" {
+		return fmt.Errorf("config: WORKFLOW_PATH must not be empty")
 	}
 	return nil
 }
