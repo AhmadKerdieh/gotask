@@ -132,6 +132,73 @@ Edit this file to change task statuses or transitions; restart to apply.
   (valid / missing fields / bad enum / oversized title / unknown field)
   and a field-level error display.
 
+## Phase 3 — Persistence: Postgres, migrations, repositories
+
+- **Driver**: `github.com/jackc/pgx/v5` native (via `pgxpool`), not
+  `database/sql`. Trade-off accepted: the repository is coupled to
+  Postgres. Justified because we use Postgres-specific features and the
+  *interface* (not the driver) is the swap point.
+- **Connection pool** (`internal/database/`): explicit `pgxpool` config
+  (max/min conns, conn lifetime), a bounded startup `Ping` so an
+  unreachable DB fails startup in seconds, and a `Close` that drains the
+  pool during graceful shutdown.
+- **Migrations** (`migrations/`): `golang-migrate` with plain `.sql`
+  files. `000001_init` creates `users`, `projects`, `tasks`, `comments`
+  with a shared `updated_at` trigger, FK relationships, and indexes. The
+  `down` is the exact tested inverse. Migrations run as an **explicit
+  operational step** (`make migrate-up`), never automatically on app
+  startup — that separation prevents two instances racing into a
+  half-migrated schema during a rolling deploy.
+- **Repository layer** (`internal/repository/`): callers depend on the
+  `TaskRepository` / `ProjectRepository` *interfaces*, never the
+  concrete Postgres types (which are unexported). This is the seam that
+  makes the Phase 4 service layer unit-testable in microseconds against
+  an in-memory fake.
+- **Identity**: the database owns it. `id UUID DEFAULT gen_random_uuid()`;
+  inserts use `RETURNING` to read the generated id + timestamps in one
+  round-trip. An unpersisted `domain.Task` honestly has `uuid.Nil`.
+- **Error translation** (`repository/errors.go`): one function maps
+  Postgres SQLSTATE codes to `apperror` — `23505` → Conflict, no rows →
+  NotFound, context errors pass through unwrapped so the timeout
+  middleware can still produce a 504. Raw pg errors never reach a client.
+- **NULL ↔ zero value**: nullable columns (`assignee_id`, `due_date`,
+  `edited_at`) map to the domain's zero-value convention
+  (`uuid.Nil` / zero `time.Time`). The translation is contained entirely
+  in the scan/write helpers.
+- **Context finally does real work**: every repository method passes
+  `ctx` to pgx. When the Phase 1 timeout fires, pgx aborts the in-flight
+  query *server-side*. The whole chain connects: HTTP timeout → context
+  cancel → query abort → clean 504.
+- **Readiness vs liveness**: new `GET /api/v1/ready` round-trips the DB
+  and returns 503 if it's down — distinct from `/health` (liveness).
+  Load balancers gate on readiness; orchestrators restart on liveness.
+- **New routes** (dev only): `POST /api/v1/debug/db/seed`,
+  `GET /api/v1/debug/db/tasks`, `GET /api/v1/debug/db/slow-query`.
+
+### New env vars
+
+```
+DATABASE_URL=postgres://gotask:gotask@localhost:5432/gotask?sslmode=disable
+DB_MAX_CONNS=10
+DB_MIN_CONNS=2
+```
+
+`DATABASE_URL` has no default — the app refuses to start without it.
+
+### Bringing up the database
+
+```bash
+make db-up         # starts Postgres in docker, waits until healthy
+make migrate-up    # applies migrations (requires the migrate CLI — see Make targets)
+make run           # start the app
+```
+
+### What the frontend gains
+
+- Persistence card: readiness pill, seed (project + task), list tasks,
+  and a slow-query button that proves the request context cancels an
+  in-flight query server-side (504, not a hung connection).
+
 ## Run it
 
 ```bash
@@ -194,4 +261,24 @@ make fmt          # go fmt ./...
 make vet          # go vet ./...
 make tidy         # go mod tidy
 make clean        # rm -rf bin coverage.*
+
+make db-up        # start Postgres (docker), wait until healthy
+make db-down      # stop Postgres (volume preserved)
+make db-psql      # psql shell into the running database
+make db-logs      # tail Postgres logs
+
+make migrate-up       # apply all up migrations
+make migrate-down     # roll back one migration
+make migrate-version  # print current schema version
+make migrate-create name=add_foo   # scaffold a new migration pair
+make migrate-force version=N       # clear a dirty state (recovery only)
 ```
+
+The migration targets require the `migrate` CLI. Install it once with
+the postgres build tag (omitting the tag yields a confusing
+"unknown driver" error):
+
+```bash
+go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+```
+

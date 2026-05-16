@@ -211,11 +211,11 @@
   <div class="shell">
     <header>
       <div class="brand">gotask<span class="dot">.</span></div>
-      <div class="meta">phase <b>02</b> · domain &amp; validation</div>
+      <div class="meta">phase <b>03</b> · persistence</div>
     </header>
 
     <p class="tagline">A minimal task tracker, <em>built from scratch</em> as a course in production Go.</p>
-    <p class="sub">Phase&nbsp;02 introduces the domain model (<code>Task</code>, <code>Project</code>, <code>User</code>, <code>Comment</code>), loads the legal vocabulary from <code>workflow.yaml</code>, and wires up <code>go-playground/validator</code> with custom rules that consult the workflow.</p>
+    <p class="sub">Phase&nbsp;03 adds durable state: a <code>pgx</code> connection pool, versioned SQL migrations, and a repository layer behind interfaces. The context you've carried since Phase&nbsp;01 now actually aborts in-flight queries.</p>
 
     <!-- Health card -->
     <section class="card">
@@ -341,6 +341,27 @@
       </div>
     </section>
 
+    <!-- Phase 3: persistence probe -->
+    <section class="card">
+      <div class="card-head">
+        <span class="label">persistence — phase 03</span>
+        <span class="pill" id="ready-pill">checking…</span>
+      </div>
+      <div class="card-body">
+        <p style="color:var(--ink-2); font-size:12.5px; margin:0 0 12px;">
+          These hit the <em>real</em> repository layer against the <em>real</em> Postgres database.
+          <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">GET /api/v1/ready</code> is the readiness probe (distinct from liveness): it round-trips the database. Seed creates a project + task; the slow query proves the request context aborts an in-flight query server-side.
+        </p>
+        <div class="button-grid">
+          <button class="btn" data-dbprobe="ready">check readiness</button>
+          <button class="btn" data-dbprobe="seed">seed project + task</button>
+          <button class="btn" data-dbprobe="list">list tasks</button>
+          <button class="btn warn" data-dbprobe="slow">slow query (20s → 504)</button>
+        </div>
+        <div id="db-result" style="margin-top:14px;"></div>
+      </div>
+    </section>
+
     <section class="phases">
       <h2>course progress</h2>
       <ul class="phase-list">
@@ -354,13 +375,17 @@
           <span class="name">HTTP routing (chi), middleware stack, typed errors</span>
           <span class="tag">complete</span>
         </li>
-        <li class="current">
+        <li class="done">
           <span class="num">02</span>
           <span class="name">Domain models &amp; validation (workflow.yaml)</span>
+          <span class="tag">complete</span>
+        </li>
+        <li class="current">
+          <span class="num">03</span>
+          <span class="name">Postgres, migrations, repositories</span>
           <span class="tag">in progress</span>
         </li>
-        <li><span class="num">03</span><span class="name">Postgres, migrations, repositories</span><span class="tag">next</span></li>
-        <li><span class="num">04</span><span class="name">Service layer, DI, unit tests with mocks</span><span class="tag"></span></li>
+        <li><span class="num">04</span><span class="name">Service layer, DI, unit tests with mocks</span><span class="tag">next</span></li>
         <li><span class="num">05</span><span class="name">Tasks REST API + integration tests</span><span class="tag"></span></li>
         <li><span class="num">06</span><span class="name">Keycloak auth (OIDC + PKCE)</span><span class="tag"></span></li>
         <li><span class="num">07</span><span class="name">Authorization, roles, audit log</span><span class="tag"></span></li>
@@ -371,8 +396,8 @@
     </section>
 
     <footer>
-      <span>gotask · go 1.22+ · chi v5</span>
-      <span>phase 02</span>
+      <span>gotask · go 1.22+ · chi v5 · pgx v5</span>
+      <span>phase 03</span>
     </footer>
   </div>
 
@@ -622,9 +647,60 @@
     }
     $("validate-btn").addEventListener("click", runValidate);
 
+    // ── Phase 3: persistence probe ────────────────────────────────────
+    async function refreshReady() {
+      const pill = $("ready-pill");
+      pill.className = "pill loading";
+      pill.textContent = "checking…";
+      const r = await call("GET", `${API}/ready`);
+      if (r.status === 200 && r.body && r.body.success) {
+        pill.className = "pill ok";
+        pill.textContent = "ready · db ok";
+      } else if (r.status === 503) {
+        pill.className = "pill err";
+        pill.textContent = "not ready · db down";
+      } else {
+        pill.className = "pill err";
+        pill.textContent = r.status === 0 ? "offline" : `error ${r.status}`;
+      }
+    }
+
+    function renderDBResult(title, body, status) {
+      const cls = status >= 500 ? "status-5xx" : status >= 400 ? "status-4xx" : "status-2xx";
+      $("db-result").innerHTML =
+        `<div style="font-size:11px; color:var(--ink-3); letter-spacing:0.1em; text-transform:uppercase; margin-bottom:6px;">${title} · <span class="${cls}">${status}</span></div>` +
+        `<pre class="raw-body" style="border:1px solid var(--line); border-radius:8px;">${highlight(body)}</pre>`;
+    }
+
+    document.querySelectorAll("[data-dbprobe]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const probe = btn.getAttribute("data-dbprobe");
+        btn.disabled = true;
+        try {
+          if (probe === "ready") {
+            await refreshReady();
+            const r = await call("GET", `${API}/ready`);
+            renderDBResult("GET /api/v1/ready", r.body, r.status);
+          } else if (probe === "seed") {
+            const r = await call("POST", `${API}/debug/db/seed`);
+            renderDBResult("POST /api/v1/debug/db/seed", r.body, r.status);
+          } else if (probe === "list") {
+            const r = await call("GET", `${API}/debug/db/tasks`);
+            renderDBResult("GET /api/v1/debug/db/tasks", r.body, r.status);
+          } else if (probe === "slow") {
+            const r = await call("GET", `${API}/debug/db/slow-query?seconds=20`);
+            renderDBResult("GET /api/v1/debug/db/slow-query?seconds=20", r.body, r.status);
+          }
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+
     // Initial health check on load.
     refreshHealth();
     refreshWorkflow();
+    refreshReady();
   </script>
 </body>
 </html>
