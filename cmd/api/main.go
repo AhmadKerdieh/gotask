@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"gotask/internal/config"
+	"gotask/internal/database"
+	"gotask/internal/repository"
 	"gotask/internal/server"
 	"gotask/internal/validator"
 	"gotask/pkg/logger"
@@ -70,13 +72,46 @@ func main() {
 	// It is safe for concurrent use.
 	vld := validator.New(wf)
 
+	// Connect the Postgres pool. A failure here is fatal: there is no
+	// point serving traffic with no database. The bounded ConnectTimeout
+	// means an unreachable database fails startup in seconds, not after a
+	// multi-minute OS TCP timeout.
+	dbCtx, dbCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	db, err := database.NewPool(dbCtx, database.Config{
+		URL:             cfg.DatabaseURL,
+		MaxConns:        int32(cfg.DBMaxConns),
+		MinConns:        int32(cfg.DBMinConns),
+		MaxConnLifetime: time.Hour,
+		ConnectTimeout:  5 * time.Second,
+	})
+	dbCancel()
+	if err != nil {
+		log.Error("database connection failed", "error", err)
+		os.Exit(1)
+	}
+	// Closed during graceful shutdown (see the shutdown branch below).
+	// Close blocks until in-flight queries finish and connections drain.
+	log.Info("database connected",
+		"max_conns", cfg.DBMaxConns,
+		"min_conns", cfg.DBMinConns,
+	)
+
+	// Build the repositories on top of the pool. These are the only
+	// objects that know SQL exists; everything above them depends on the
+	// repository interfaces, not these concrete values.
+	taskRepo := repository.NewTaskRepository(db.Pool)
+	projectRepo := repository.NewProjectRepository(db.Pool)
+
 	// Build the HTTP handler. server.NewRouter is the single place routes
 	// and middleware are composed; main just hands over dependencies.
 	handler := server.NewRouter(server.Deps{
-		Config:    cfg,
-		Logger:    log,
-		Workflow:  wf,
-		Validator: vld,
+		Config:      cfg,
+		Logger:      log,
+		Workflow:    wf,
+		Validator:   vld,
+		DB:          db,
+		TaskRepo:    taskRepo,
+		ProjectRepo: projectRepo,
 	})
 
 	srv := &http.Server{
@@ -121,8 +156,14 @@ func main() {
 		if err := srv.Shutdown(ctx); err != nil {
 			log.Error("graceful shutdown failed; forcing close", "error", err)
 			_ = srv.Close()
+			db.Close()
 			os.Exit(1)
 		}
+
+		// Close the pool only AFTER the HTTP server has stopped accepting
+		// and finished in-flight requests. Closing it earlier would yank
+		// the database out from under requests that are still running.
+		db.Close()
 		log.Info("shutdown complete")
 	}
 }
