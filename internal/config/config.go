@@ -42,19 +42,6 @@ type Config struct {
 	// (e.g. /etc/gotask/workflow.yaml) and ship the file alongside
 	// the binary.
 	WorkflowPath string `mapstructure:"WORKFLOW_PATH"`
-
-	// DatabaseURL is the libpq-style Postgres connection string. There is
-	// no default — running without a database is never correct for this
-	// application, so an empty value is a hard startup error rather than
-	// a silent fallback to some localhost guess.
-	DatabaseURL string `mapstructure:"DATABASE_URL"`
-
-	// DBMaxConns / DBMinConns size the connection pool. The defaults are
-	// modest on purpose: Postgres has a global max_connections budget
-	// (default 100) shared by every client, so a single service should
-	// claim a known, bounded slice of it.
-	DBMaxConns int `mapstructure:"DB_MAX_CONNS"`
-	DBMinConns int `mapstructure:"DB_MIN_CONNS"`
 }
 
 // Load reads the .env file (if present) and overlays environment variables,
@@ -72,8 +59,6 @@ func Load() (*Config, error) {
 	v.SetDefault("CORS_ALLOWED_ORIGINS", "http://localhost:8080")
 	v.SetDefault("REQUEST_TIMEOUT", "15s")
 	v.SetDefault("WORKFLOW_PATH", "./workflow.yaml")
-	v.SetDefault("DB_MAX_CONNS", 10)
-	v.SetDefault("DB_MIN_CONNS", 2)
 
 	// .env file lookup.
 	v.SetConfigName(".env")
@@ -142,15 +127,6 @@ func (c *Config) validate() error {
 	}
 	if c.WorkflowPath == "" {
 		return fmt.Errorf("config: WORKFLOW_PATH must not be empty")
-	}
-	if c.DatabaseURL == "" {
-		return fmt.Errorf("config: DATABASE_URL is required (no default — see .env.example)")
-	}
-	if c.DBMaxConns <= 0 {
-		return fmt.Errorf("config: DB_MAX_CONNS must be positive, got %d", c.DBMaxConns)
-	}
-	if c.DBMinConns < 0 || c.DBMinConns > c.DBMaxConns {
-		return fmt.Errorf("config: DB_MIN_CONNS must be between 0 and DB_MAX_CONNS (%d), got %d", c.DBMaxConns, c.DBMinConns)
 	}
 	return nil
 }

@@ -23,8 +23,6 @@ import (
 	"gotask/internal/apperror"
 	"gotask/internal/config"
 	"gotask/internal/middleware"
-	"gotask/internal/database"
-	"gotask/internal/repository"
 	"gotask/internal/validator"
 	"gotask/pkg/response"
 )
@@ -36,10 +34,6 @@ type Handler struct {
 	cfg       *config.Config
 	workflow  *config.Workflow
 	validator *validator.Validator
-
-	db          *database.DB
-	taskRepo    repository.TaskRepository
-	projectRepo repository.ProjectRepository
 }
 
 // Deps is the constructor input for Handler. Using a struct (rather than
@@ -51,22 +45,15 @@ type Deps struct {
 	Config    *config.Config
 	Workflow  *config.Workflow
 	Validator *validator.Validator
-
-	DB          *database.DB
-	TaskRepo    repository.TaskRepository
-	ProjectRepo repository.ProjectRepository
 }
 
 // New constructs a Handler from the given dependencies.
 func New(d Deps) *Handler {
 	return &Handler{
-		log:         d.Logger,
-		cfg:         d.Config,
-		workflow:    d.Workflow,
-		validator:   d.Validator,
-		db:          d.DB,
-		taskRepo:    d.TaskRepo,
-		projectRepo: d.ProjectRepo,
+		log:       d.Logger,
+		cfg:       d.Config,
+		workflow:  d.Workflow,
+		validator: d.Validator,
 	}
 }
 

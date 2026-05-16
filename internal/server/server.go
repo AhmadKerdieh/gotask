@@ -11,10 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"gotask/internal/config"
-	"gotask/internal/database"
 	"gotask/internal/handler"
 	"gotask/internal/middleware"
-	"gotask/internal/repository"
 	"gotask/internal/validator"
 	"gotask/pkg/response"
 )
@@ -28,13 +26,6 @@ type Deps struct {
 	Logger    *slog.Logger
 	Workflow  *config.Workflow
 	Validator *validator.Validator
-
-	// DB is carried so the readiness probe can ping it. Repositories are
-	// passed as interfaces — the server and handlers never see the
-	// concrete Postgres types.
-	DB          *database.DB
-	TaskRepo    repository.TaskRepository
-	ProjectRepo repository.ProjectRepository
 }
 
 // NewRouter assembles the middleware chain and the route table and returns
@@ -81,18 +72,13 @@ func NewRouter(d Deps) http.Handler {
 		response.Error(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed for this route")
 	})
 
-	// Build the handler bundle. Repositories are passed as interfaces;
-	// the service layer in Phase 4 will sit between handlers and repos,
-	// but for now the dev-only DB probe talks to them directly to prove
-	// the persistence layer works end to end.
+	// Build the handler bundle. Services and repositories will join in
+	// later phases — same construction pattern.
 	h := handler.New(handler.Deps{
-		Logger:      d.Logger,
-		Config:      d.Config,
-		Workflow:    d.Workflow,
-		Validator:   d.Validator,
-		DB:          d.DB,
-		TaskRepo:    d.TaskRepo,
-		ProjectRepo: d.ProjectRepo,
+		Logger:    d.Logger,
+		Config:    d.Config,
+		Workflow:  d.Workflow,
+		Validator: d.Validator,
 	})
 
 	// ── API routes ────────────────────────────────────────────────────
@@ -101,12 +87,6 @@ func NewRouter(d Deps) http.Handler {
 	// these paths; integration tests will too.
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", h.Health)
-
-		// Readiness vs liveness: /health answers "is the process up?".
-		// /ready answers "can it actually serve traffic?" — which for
-		// this app means the database round-trips. Load balancers and
-		// orchestrators should gate traffic on readiness, not liveness.
-		r.Get("/ready", h.Ready)
 
 		// Workflow introspection — public, read-only, useful for the
 		// frontend to render dropdowns with the legal statuses /
@@ -126,14 +106,6 @@ func NewRouter(d Deps) http.Handler {
 				// POST a JSON body shaped like CreateTaskRequest;
 				// receive either {valid:true} or the field error map.
 				r.Post("/validate", h.DebugValidate)
-
-				// Phase 3: prove the persistence layer works end to end.
-				// These hit the real repositories against the real
-				// database — create a throwaway project, create a task
-				// in it, list, and clean up.
-				r.Post("/db/seed", h.DebugDBSeed)
-				r.Get("/db/tasks", h.DebugDBListTasks)
-				r.Get("/db/slow-query", h.DebugDBSlowQuery)
 			})
 		}
 	})

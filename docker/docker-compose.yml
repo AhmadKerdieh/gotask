@@ -1,44 +1,8 @@
 # docker/docker-compose.yml
 #
-# Phase 3: a single `postgres` service. Phase 6 will add `keycloak`.
+# Phase 3 will add the `postgres` service here.
+# Phase 6 will add the `keycloak` service here.
 #
-# Run from the repo root with:
-#   docker compose -f docker/docker-compose.yml up -d
-#
-# The application itself still runs as a local `go run` for the course —
-# we are containerising dependencies, not the app, until Phase 10.
+# For Phase 0 there are no containers to run — the API is a single Go binary.
 
-services:
-  postgres:
-    # Pin a specific minor version. "postgres:16" would silently move
-    # under you on every pull; reproducibility means pinning. 16 ships
-    # gen_random_uuid() in core (no pgcrypto extension needed), which the
-    # migration relies on.
-    image: postgres:16.3
-    container_name: gotask-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: gotask
-      POSTGRES_PASSWORD: gotask
-      POSTGRES_DB: gotask
-    ports:
-      # host:container. The app connects to localhost:5432 from outside
-      # the compose network (it runs as a local process, not a service
-      # here).
-      - "5432:5432"
-    volumes:
-      # Named volume so data survives `docker compose down`. Use
-      # `docker compose down -v` to wipe it deliberately.
-      - gotask_pgdata:/var/lib/postgresql/data
-    healthcheck:
-      # pg_isready returns success only once Postgres is actually
-      # accepting connections — not merely when the container has
-      # started. The Makefile migrate targets wait on this so you never
-      # race a migration against a not-yet-ready database.
-      test: ["CMD-SHELL", "pg_isready -U gotask -d gotask"]
-      interval: 3s
-      timeout: 3s
-      retries: 10
-
-volumes:
-  gotask_pgdata:
+services: {}
