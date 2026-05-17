@@ -7,7 +7,6 @@ import (
 	"github.com/google/uuid"
 
 	"gotask/internal/domain"
-	"gotask/internal/repository"
 )
 
 // CreateProjectInput is the service-level input for creating a project.
@@ -53,7 +52,7 @@ func (s *ProjectService) Create(ctx context.Context, in CreateProjectInput) (dom
 		return domain.Project{}, err
 	}
 
-	created, err := s.projects.Create(ctx, repository.NewProjectInput{
+	created, err := s.projects.Create(ctx, domain.NewProjectInput{
 		Key:         key,
 		Name:        name,
 		Description: in.Description,

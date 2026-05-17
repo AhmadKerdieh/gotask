@@ -90,7 +90,7 @@ func (s *TaskService) Create(ctx context.Context, in CreateTaskInput) (domain.Ta
 	// 5. Persist. Convert the service input into the repository input
 	//    shape. The repository owns NULL/zero mapping; we just pass the
 	//    domain values.
-	created, err := s.tasks.Create(ctx, repository.NewTaskInput{
+	created, err := s.tasks.Create(ctx, domain.NewTaskInput{
 		ProjectID:   in.ProjectID,
 		Title:       title,
 		Description: in.Description,
@@ -134,7 +134,7 @@ func (s *TaskService) List(ctx context.Context, f repository.TaskFilter) ([]doma
 //  2. validate the requested status is even a known value
 //  3. ask the workflow whether old -> new is a legal transition
 //     (this also rejects moves out of terminal statuses and no-op
-//      self-transitions, by the workflow's own rules)
+//     self-transitions, by the workflow's own rules)
 //  4. only then write
 func (s *TaskService) UpdateStatus(ctx context.Context, id uuid.UUID, to domain.Status) (domain.Task, error) {
 	current, err := s.tasks.GetByID(ctx, id)
