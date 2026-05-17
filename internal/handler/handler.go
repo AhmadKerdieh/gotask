@@ -25,6 +25,7 @@ import (
 	"gotask/internal/middleware"
 	"gotask/internal/database"
 	"gotask/internal/repository"
+	"gotask/internal/service"
 	"gotask/internal/validator"
 	"gotask/pkg/response"
 )
@@ -40,6 +41,9 @@ type Handler struct {
 	db          *database.DB
 	taskRepo    repository.TaskRepository
 	projectRepo repository.ProjectRepository
+
+	taskSvc    *service.TaskService
+	projectSvc *service.ProjectService
 }
 
 // Deps is the constructor input for Handler. Using a struct (rather than
@@ -55,6 +59,9 @@ type Deps struct {
 	DB          *database.DB
 	TaskRepo    repository.TaskRepository
 	ProjectRepo repository.ProjectRepository
+
+	TaskSvc    *service.TaskService
+	ProjectSvc *service.ProjectService
 }
 
 // New constructs a Handler from the given dependencies.
@@ -67,6 +74,8 @@ func New(d Deps) *Handler {
 		db:          d.DB,
 		taskRepo:    d.TaskRepo,
 		projectRepo: d.ProjectRepo,
+		taskSvc:     d.TaskSvc,
+		projectSvc:  d.ProjectSvc,
 	}
 }
 
@@ -87,6 +96,35 @@ func (h *Handler) respondError(w http.ResponseWriter, r *http.Request, err error
 	log := middleware.LoggerFromContext(r.Context())
 	if log == nil {
 		log = h.log
+	}
+
+	// Service-vocabulary translation. The service package deliberately
+	// does not import apperror (it has no concept of HTTP); this is the
+	// single point where its errors become HTTP. Order matters: check
+	// the typed *service.ValidationError before the sentinels, and map
+	// sentinels with errors.Is so wrapped errors still match.
+	var sve *service.ValidationError
+	if errors.As(err, &sve) {
+		response.ValidationError(w, sve.Fields)
+		return
+	}
+	switch {
+	case errors.Is(err, service.ErrNotFound):
+		response.Error(w, http.StatusNotFound, "not_found", "resource not found")
+		return
+	case errors.Is(err, service.ErrInvalidTransition):
+		// TransitionError carries from/to; surface its message so the
+		// client learns which transition was rejected.
+		msg := "invalid status transition"
+		var te *service.TransitionError
+		if errors.As(err, &te) {
+			msg = te.Error()
+		}
+		response.Error(w, http.StatusConflict, "invalid_transition", msg)
+		return
+	case errors.Is(err, service.ErrConflict):
+		response.Error(w, http.StatusConflict, "conflict", "the request conflicts with current state")
+		return
 	}
 
 	var ae *apperror.Error

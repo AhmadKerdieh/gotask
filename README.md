@@ -199,6 +199,64 @@ make run           # start the app
   and a slow-query button that proves the request context cancels an
   in-flight query server-side (504, not a hung connection).
 
+## Phase 4 — Service layer, dependency injection, unit tests
+
+- **The missing layer.** Phase 3's review exposed a gap: nothing
+  enforced business rules — a task could be created with status
+  `"banana"`, a `done` task could be illegally reopened. The service
+  layer closes it. Rule of thumb for what belongs here: *if gotask were
+  a CLI instead of an HTTP API, would this logic still need to exist?*
+  If yes, it's a service rule.
+- **`TaskService` / `ProjectService`** (`internal/service/`): default
+  application (empty status/priority → workflow defaults), value
+  legality (status/priority must be in `workflow.yaml` — this is the
+  gate that stops `"banana"`), and the centrepiece rule: status
+  **transition enforcement** via `workflow.CanTransition`. A terminal
+  task is frozen; an illegal jump (`open → done`) is rejected before
+  any write.
+- **Depends on interfaces, not Postgres.** The service holds
+  `repository.TaskRepository` (the Phase 3 interface). Production injects
+  the Postgres impl; tests inject an in-memory fake. Identical service
+  code both ways — this substitutability is the entire payoff of the
+  Phase 3 interface seam.
+- **Service-level error vocabulary** (`service/errors.go`):
+  `ErrNotFound`, `ErrInvalidTransition`, `ErrConflict`, and a typed
+  `ValidationError` carrying a field→message map. The service does
+  **not** import `apperror` — it has no concept of HTTP. The handler's
+  `respondError` is the single point that maps the service vocabulary →
+  apperror → HTTP. Same discipline as the repository's pg-error
+  translator.
+- **First real unit tests.** `task_service_test.go` runs table-driven
+  tests against hand-written in-memory fakes (`fakes_test.go`). No
+  database, no Docker — the suite runs in milliseconds. A fake genuinely
+  works (stores and retrieves); you assert on outcomes.
+- **Fake vs mock, shown side by side.** `task_service_mock_test.go`
+  re-verifies one behaviour with a `testify/mock` instead of a fake, to
+  make the trade-off concrete: a mock can assert *interactions* a fake
+  cannot — here, that an illegal transition is rejected *without the
+  repository's `Update` ever being called*. Use a fake when the test
+  cares what happened; a mock when it cares that a specific call was (or
+  wasn't) made.
+- **DI wiring.** The graph grew one layer: repos → services → handlers.
+  The dev DB probes were refactored to go through the service, so the
+  frontend now exercises the real enforced path. New
+  `config.NewWorkflowForTest` lets tests build a workflow without a YAML
+  file (runs the same validation as the file loader).
+
+### Running the tests
+
+```bash
+make test          # whole suite, no database needed
+go test ./internal/service/ -v   # see each business rule pass by name
+```
+
+### What the frontend gains
+
+- Transition tester card: paste a task id, pick a target status, and
+  watch the service accept a legal move or reject an illegal one (409
+  invalid_transition) or an unknown status (422) — a business rule
+  rejecting a request, visible from the browser.
+
 ## Run it
 
 ```bash

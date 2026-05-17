@@ -9,6 +9,7 @@ import (
 	"gotask/internal/apperror"
 	"gotask/internal/domain"
 	"gotask/internal/repository"
+	"gotask/internal/service"
 	"gotask/pkg/response"
 )
 
@@ -48,13 +49,14 @@ func (h *Handler) DebugDBSeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create a project. The key is time-based so repeated seeds do not
-	// collide on the projects.key UNIQUE constraint — and if you DO want
-	// to see the conflict path, hit this twice within the same second.
-	proj, err := h.projectRepo.Create(ctx, domain.NewProjectInput{
+	// Phase 4: go through the SERVICE, not the repository. The service
+	// normalises the project key, validates, and applies workflow
+	// defaults to the task. This exercises the real enforced path the
+	// production Tasks API will use in Phase 5.
+	proj, err := h.projectSvc.Create(ctx, service.CreateProjectInput{
 		Key:         "SEED" + time.Now().Format("150405"),
 		Name:        "Seed Project",
-		Description: "Created by the Phase 3 DB probe.",
+		Description: "Created by the Phase 4 service probe.",
 		OwnerID:     seedReporterID,
 	})
 	if err != nil {
@@ -62,14 +64,13 @@ func (h *Handler) DebugDBSeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create a task in that project. Status/priority come from the
-	// workflow defaults, exactly as the real service will do in Phase 4.
-	task, err := h.taskRepo.Create(ctx, domain.NewTaskInput{
+	// No status/priority supplied — the service applies the workflow
+	// defaults. Contrast with Phase 3, where the handler did this by
+	// hand; that responsibility now lives in exactly one place.
+	task, err := h.taskSvc.Create(ctx, service.CreateTaskInput{
 		ProjectID:   proj.ID,
 		Title:       "Seeded task",
-		Description: "Proves Create + RETURNING + FK to projects.",
-		Status:      domain.Status(h.workflow.DefaultStatus),
-		Priority:    domain.Priority(h.workflow.DefaultPriority),
+		Description: "Created via the service; defaults applied by the service.",
 		ReporterID:  seedReporterID,
 	})
 	if err != nil {
@@ -83,16 +84,15 @@ func (h *Handler) DebugDBSeed(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// DebugDBListTasks lists tasks via the repository, optionally filtered by
-// ?status=. It proves the dynamic List query and the NULL <-> zero-value
-// scanning both work against real rows.
+// DebugDBListTasks lists tasks via the SERVICE, optionally filtered by
+// ?status=.
 func (h *Handler) DebugDBListTasks(w http.ResponseWriter, r *http.Request) {
 	f := repository.TaskFilter{}
 	if s := r.URL.Query().Get("status"); s != "" {
 		f.Status = domain.Status(s)
 	}
 
-	tasks, err := h.taskRepo.List(r.Context(), f)
+	tasks, err := h.taskSvc.List(r.Context(), f)
 	if err != nil {
 		h.respondError(w, r, err)
 		return
@@ -101,6 +101,35 @@ func (h *Handler) DebugDBListTasks(w http.ResponseWriter, r *http.Request) {
 	response.OK(w, http.StatusOK, map[string]any{
 		"count": len(tasks),
 		"tasks": tasks,
+	})
+}
+
+// DebugTransition exercises the centrepiece business rule from the
+// browser: given an existing task id and a target status, attempt the
+// transition through the service. A legal move returns the updated task;
+// an illegal one returns 409 invalid_transition; an unknown status
+// returns 422. This lets you watch a business rule reject a request
+// without building the full Tasks API (Phase 5).
+//
+// Query params: ?id=<task-uuid>&to=<status>
+func (h *Handler) DebugTransition(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Query().Get("id")
+	to := r.URL.Query().Get("to")
+
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		h.respondError(w, r, apperror.BadRequest("id must be a valid task UUID"))
+		return
+	}
+
+	updated, err := h.taskSvc.UpdateStatus(r.Context(), id, domain.Status(to))
+	if err != nil {
+		h.respondError(w, r, err)
+		return
+	}
+
+	response.OK(w, http.StatusOK, map[string]any{
+		"task": updated,
 	})
 }
 

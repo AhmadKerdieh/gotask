@@ -211,11 +211,11 @@
   <div class="shell">
     <header>
       <div class="brand">gotask<span class="dot">.</span></div>
-      <div class="meta">phase <b>03</b> · persistence</div>
+      <div class="meta">phase <b>04</b> · service layer</div>
     </header>
 
     <p class="tagline">A minimal task tracker, <em>built from scratch</em> as a course in production Go.</p>
-    <p class="sub">Phase&nbsp;03 adds durable state: a <code>pgx</code> connection pool, versioned SQL migrations, and a repository layer behind interfaces. The context you've carried since Phase&nbsp;01 now actually aborts in-flight queries.</p>
+    <p class="sub">Phase&nbsp;04 adds the business-logic layer: workflow defaults, value legality, and status-transition enforcement — the rules that are neither HTTP nor SQL. Plus the first real unit tests, running with no database.</p>
 
     <!-- Health card -->
     <section class="card">
@@ -362,6 +362,33 @@
       </div>
     </section>
 
+    <!-- Phase 4: transition tester -->
+    <section class="card">
+      <div class="card-head">
+        <span class="label">transition tester — phase 04</span>
+        <span class="pill" id="trans-pill">idle</span>
+      </div>
+      <div class="card-body">
+        <p style="color:var(--ink-2); font-size:12.5px; margin:0 0 12px;">
+          The service enforces <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">workflow.yaml</code> transitions. Seed a task above to get an id, paste it here, pick a target status, and watch a business rule accept or reject the change. Legal → updated task. Illegal → <b>409 invalid_transition</b>. Unknown status → <b>422</b>. A new task starts in <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">open</code>; try <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">in_progress</code> (legal) then <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">done</code> from open (illegal — skips the chain).
+        </p>
+        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+          <input id="trans-id" type="text" placeholder="task uuid (from seed result)"
+            style="flex:1; min-width:280px; font-family:var(--mono); font-size:12px; color:var(--ink); background:var(--bg); border:1px solid var(--line-2); padding:7px 12px; border-radius:8px;">
+          <select class="select" id="trans-to">
+            <option value="open">open</option>
+            <option value="in_progress" selected>in_progress</option>
+            <option value="in_review">in_review</option>
+            <option value="done">done</option>
+            <option value="cancelled">cancelled</option>
+            <option value="banana">banana (unknown)</option>
+          </select>
+          <button class="btn" id="trans-btn">attempt transition</button>
+        </div>
+        <div id="trans-result" style="margin-top:14px;"></div>
+      </div>
+    </section>
+
     <section class="phases">
       <h2>course progress</h2>
       <ul class="phase-list">
@@ -380,13 +407,17 @@
           <span class="name">Domain models &amp; validation (workflow.yaml)</span>
           <span class="tag">complete</span>
         </li>
-        <li class="current">
+        <li class="done">
           <span class="num">03</span>
           <span class="name">Postgres, migrations, repositories</span>
+          <span class="tag">complete</span>
+        </li>
+        <li class="current">
+          <span class="num">04</span>
+          <span class="name">Service layer, DI, unit tests with mocks</span>
           <span class="tag">in progress</span>
         </li>
-        <li><span class="num">04</span><span class="name">Service layer, DI, unit tests with mocks</span><span class="tag">next</span></li>
-        <li><span class="num">05</span><span class="name">Tasks REST API + integration tests</span><span class="tag"></span></li>
+        <li><span class="num">05</span><span class="name">Tasks REST API + integration tests</span><span class="tag">next</span></li>
         <li><span class="num">06</span><span class="name">Keycloak auth (OIDC + PKCE)</span><span class="tag"></span></li>
         <li><span class="num">07</span><span class="name">Authorization, roles, audit log</span><span class="tag"></span></li>
         <li><span class="num">08</span><span class="name">Goroutines, channels, worker pools</span><span class="tag"></span></li>
@@ -397,7 +428,7 @@
 
     <footer>
       <span>gotask · go 1.22+ · chi v5 · pgx v5</span>
-      <span>phase 03</span>
+      <span>phase 04</span>
     </footer>
   </div>
 
@@ -684,6 +715,13 @@
           } else if (probe === "seed") {
             const r = await call("POST", `${API}/debug/db/seed`);
             renderDBResult("POST /api/v1/debug/db/seed", r.body, r.status);
+            // Convenience: drop the freshly created task id straight
+            // into the Phase 4 transition tester so you can act on it
+            // without copy-pasting.
+            if (r.status === 201 && r.body && r.body.data && r.body.data.task) {
+              const tid = r.body.data.task.ID || r.body.data.task.id;
+              if (tid) $("trans-id").value = tid;
+            }
           } else if (probe === "list") {
             const r = await call("GET", `${API}/debug/db/tasks`);
             renderDBResult("GET /api/v1/debug/db/tasks", r.body, r.status);
@@ -695,6 +733,47 @@
           btn.disabled = false;
         }
       });
+    });
+
+    // ── Phase 4: transition tester ────────────────────────────────────
+    $("trans-btn").addEventListener("click", async () => {
+      const pill = $("trans-pill");
+      const id = $("trans-id").value.trim();
+      const to = $("trans-to").value;
+      const out = $("trans-result");
+
+      if (!id) {
+        pill.className = "pill err";
+        pill.textContent = "need a task id";
+        out.innerHTML = `<div class="field-errors"><div class="field-err"><span class="fname">id</span><span class="fmsg">seed a task first, then its id auto-fills here</span></div></div>`;
+        return;
+      }
+
+      pill.className = "pill loading";
+      pill.textContent = "attempting…";
+      out.innerHTML = "";
+
+      const url = `${API}/debug/transition?id=${encodeURIComponent(id)}&to=${encodeURIComponent(to)}`;
+      const r = await call("POST", url);
+
+      const cls = r.status >= 500 ? "status-5xx" : r.status >= 400 ? "status-4xx" : "status-2xx";
+      out.innerHTML =
+        `<div style="font-size:11px; color:var(--ink-3); letter-spacing:0.1em; text-transform:uppercase; margin-bottom:6px;">POST /api/v1/debug/transition?to=${to} · <span class="${cls}">${r.status}</span></div>` +
+        `<pre class="raw-body" style="border:1px solid var(--line); border-radius:8px;">${highlight(r.body)}</pre>`;
+
+      if (r.status === 200) {
+        pill.className = "pill ok";
+        pill.textContent = "transition allowed";
+      } else if (r.status === 409) {
+        pill.className = "pill warn";
+        pill.textContent = "409 rejected by rule";
+      } else if (r.status === 422) {
+        pill.className = "pill warn";
+        pill.textContent = "422 unknown status";
+      } else {
+        pill.className = "pill err";
+        pill.textContent = `error ${r.status}`;
+      }
     });
 
     // Initial health check on load.

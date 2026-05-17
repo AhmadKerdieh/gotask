@@ -146,6 +146,38 @@ func (w *Workflow) buildLookups() {
 	}
 }
 
+// NewWorkflowForTest builds a validated Workflow from in-memory values,
+// without reading a file. It exists so unit tests in other packages
+// (notably internal/service) can construct a known workflow directly
+// instead of writing a temp YAML file. It runs the SAME validate() and
+// buildLookups() as LoadWorkflow, so a workflow built here behaves
+// identically to one loaded from disk — tests can't accidentally rely on
+// an inconsistent workflow that production would have rejected at
+// startup.
+//
+// It is exported (not in a _test.go file) because Go test binaries in
+// package service cannot reach unexported helpers of package config.
+// Naming it ...ForTest documents the intended use without preventing it.
+func NewWorkflowForTest(
+	statuses, terminal, priorities []string,
+	transitions map[string][]string,
+	defaultStatus, defaultPriority string,
+) (*Workflow, error) {
+	w := &Workflow{
+		Statuses:         statuses,
+		TerminalStatuses: terminal,
+		Transitions:      transitions,
+		Priorities:       priorities,
+		DefaultStatus:    defaultStatus,
+		DefaultPriority:  defaultPriority,
+	}
+	if err := w.validate(); err != nil {
+		return nil, err
+	}
+	w.buildLookups()
+	return w, nil
+}
+
 // IsStatus reports whether s is a legal status.
 func (w *Workflow) IsStatus(s string) bool {
 	_, ok := w.statusSet[s]

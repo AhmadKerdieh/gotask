@@ -20,6 +20,7 @@ import (
 	"gotask/internal/database"
 	"gotask/internal/repository"
 	"gotask/internal/server"
+	"gotask/internal/service"
 	"gotask/internal/validator"
 	"gotask/pkg/logger"
 )
@@ -102,6 +103,19 @@ func main() {
 	taskRepo := repository.NewTaskRepository(db.Pool)
 	projectRepo := repository.NewProjectRepository(db.Pool)
 
+	// Build the services on top of the repositories. The services receive
+	// the repository INTERFACES (taskRepo/projectRepo satisfy them) plus
+	// the workflow. This is the seam that makes the service unit-testable
+	// against in-memory fakes — see internal/service/*_test.go. In
+	// production the same constructor gets the Postgres-backed repos.
+	svcDeps := service.Deps{
+		Tasks:    taskRepo,
+		Projects: projectRepo,
+		Workflow: wf,
+	}
+	taskSvc := service.NewTaskService(svcDeps)
+	projectSvc := service.NewProjectService(svcDeps)
+
 	// Build the HTTP handler. server.NewRouter is the single place routes
 	// and middleware are composed; main just hands over dependencies.
 	handler := server.NewRouter(server.Deps{
@@ -112,6 +126,8 @@ func main() {
 		DB:          db,
 		TaskRepo:    taskRepo,
 		ProjectRepo: projectRepo,
+		TaskSvc:     taskSvc,
+		ProjectSvc:  projectSvc,
 	})
 
 	srv := &http.Server{

@@ -15,6 +15,7 @@ import (
 	"gotask/internal/handler"
 	"gotask/internal/middleware"
 	"gotask/internal/repository"
+	"gotask/internal/service"
 	"gotask/internal/validator"
 	"gotask/pkg/response"
 )
@@ -35,6 +36,11 @@ type Deps struct {
 	DB          *database.DB
 	TaskRepo    repository.TaskRepository
 	ProjectRepo repository.ProjectRepository
+
+	// Services hold the business logic. Handlers call these, not the
+	// repositories directly (from Phase 4 onward).
+	TaskSvc    *service.TaskService
+	ProjectSvc *service.ProjectService
 }
 
 // NewRouter assembles the middleware chain and the route table and returns
@@ -93,6 +99,8 @@ func NewRouter(d Deps) http.Handler {
 		DB:          d.DB,
 		TaskRepo:    d.TaskRepo,
 		ProjectRepo: d.ProjectRepo,
+		TaskSvc:     d.TaskSvc,
+		ProjectSvc:  d.ProjectSvc,
 	})
 
 	// ── API routes ────────────────────────────────────────────────────
@@ -128,12 +136,16 @@ func NewRouter(d Deps) http.Handler {
 				r.Post("/validate", h.DebugValidate)
 
 				// Phase 3: prove the persistence layer works end to end.
-				// These hit the real repositories against the real
-				// database — create a throwaway project, create a task
-				// in it, list, and clean up.
+				// These now go through the SERVICE (Phase 4 refactor),
+				// so they exercise the real enforced path.
 				r.Post("/db/seed", h.DebugDBSeed)
 				r.Get("/db/tasks", h.DebugDBListTasks)
 				r.Get("/db/slow-query", h.DebugDBSlowQuery)
+
+				// Phase 4: watch a business rule reject a request.
+				// ?id=<task>&to=<status> — legal transition returns the
+				// updated task; illegal returns 409; unknown status 422.
+				r.Post("/transition", h.DebugTransition)
 			})
 		}
 	})
