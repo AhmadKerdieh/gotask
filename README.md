@@ -257,6 +257,68 @@ go test ./internal/service/ -v   # see each business rule pass by name
   invalid_transition) or an unknown status (422) — a business rule
   rejecting a request, visible from the browser.
 
+## Phase 5 — Tasks REST API & the DTO boundary
+
+- **Real API, debug probes removed (clean cut).** `debug.go`,
+  `debug_db.go`, `debug_validate.go` are deleted; their routes are gone.
+  The real endpoints supersede them. Handlers no longer hold the raw
+  repositories — they go through services exclusively (the readiness
+  probe still pings the DB directly, which is legitimate).
+- **Endpoints**:
+  - `POST /api/v1/projects`, `GET /api/v1/projects`,
+    `GET /api/v1/projects/{id}`
+  - `POST /api/v1/tasks`, `GET /api/v1/tasks` (filters: `project_id`,
+    `status`, `assignee_id`), `GET /api/v1/tasks/{id}`,
+    `DELETE /api/v1/tasks/{id}`
+  - `PATCH /api/v1/tasks/{id}/status` — status is its own sub-resource
+    because it is the one mutation governed by the workflow transition
+    rule; isolating it gives that rule a single guarded entry point.
+- **The DTO boundary is now physical** (`internal/handler/dto/`):
+  `CreateTaskRequest`, `UpdateTaskStatusRequest`, `TaskResponse`,
+  `CreateProjectRequest`, `ProjectResponse`. Each handler does
+  decode → validate → convert wire→service → call service →
+  convert domain→wire → encode. The `reporter_id` / `owner_id`
+  divergence is real code: the request DTOs have no such field, so a
+  client cannot forge authorship. Until Phase 6 the handler stubs the
+  identity to a fixed seeded user — that stub is the visible seam where
+  auth slots in.
+- **Strict request decoding** (`handler/decode.go`): one shared helper
+  enforces `Content-Type: application/json` (415), a 1 MiB body cap
+  (413), unknown-field rejection (400), and single-value bodies. Every
+  decode failure maps to the standard envelope — no raw Go error reaches
+  a client. Same one-translation-point discipline as everywhere else.
+
+### Backlog / hardening (tracked, deferred deliberately)
+
+These are known, intentional deferrals — recorded here so they are
+visible decisions, not forgotten gaps:
+
+1. **Integration tests** (deferred to Phase 10). The Phase 4 service
+   tests use in-memory fakes — fast, but a fake can never catch a
+   malformed SQL string, a drifted column name, or a wrong NULL/zero
+   mapping in the repository. `internal/repository/integration_test.go`
+   is a skipped, fully-documented placeholder describing exactly what
+   Phase 10 will build with `testcontainers-go` (real ephemeral
+   Postgres, real migrations, real SQL). It is `t.Skip`-ped so the
+   suite stays green while the gap stays honestly marked.
+2. **Graceful-shutdown timeout** is hardcoded to 10s in `cmd/api/main.go`
+   and is currently *less* than `REQUEST_TIMEOUT` (15s), so a slow
+   in-flight request during shutdown is force-killed. Should be derived
+   from `RequestTimeout + margin`. Deferred to Phase 9 (production
+   hardening), where shutdown-under-load is the topic.
+3. **Service↔repository error coupling** uses string matching
+   (`mapRepoError`). A small typed error in the repository package
+   would be cleaner. Deferred to Phase 9.
+
+### What the frontend gains
+
+- A real task board (the probe panels are gone): create projects,
+  create tasks (status omitted → service applies the workflow default),
+  list/filter tasks, change a task's status through the real
+  `PATCH /tasks/{id}/status` and watch the workflow rule reject an
+  illegal move with a 409, delete tasks. It only ever calls the real
+  API — there are no debug endpoints left to call.
+
 ## Run it
 
 ```bash

@@ -24,7 +24,6 @@ import (
 	"gotask/internal/config"
 	"gotask/internal/middleware"
 	"gotask/internal/database"
-	"gotask/internal/repository"
 	"gotask/internal/service"
 	"gotask/internal/validator"
 	"gotask/pkg/response"
@@ -38,9 +37,11 @@ type Handler struct {
 	workflow  *config.Workflow
 	validator *validator.Validator
 
-	db          *database.DB
-	taskRepo    repository.TaskRepository
-	projectRepo repository.ProjectRepository
+	// db is retained only for the readiness probe (a real DB ping).
+	// Handlers never touch repositories directly — they go through
+	// services. The raw repos were removed when the debug probes were
+	// deleted in Phase 5.
+	db *database.DB
 
 	taskSvc    *service.TaskService
 	projectSvc *service.ProjectService
@@ -56,9 +57,7 @@ type Deps struct {
 	Workflow  *config.Workflow
 	Validator *validator.Validator
 
-	DB          *database.DB
-	TaskRepo    repository.TaskRepository
-	ProjectRepo repository.ProjectRepository
+	DB *database.DB
 
 	TaskSvc    *service.TaskService
 	ProjectSvc *service.ProjectService
@@ -67,15 +66,13 @@ type Deps struct {
 // New constructs a Handler from the given dependencies.
 func New(d Deps) *Handler {
 	return &Handler{
-		log:         d.Logger,
-		cfg:         d.Config,
-		workflow:    d.Workflow,
-		validator:   d.Validator,
-		db:          d.DB,
-		taskRepo:    d.TaskRepo,
-		projectRepo: d.ProjectRepo,
-		taskSvc:     d.TaskSvc,
-		projectSvc:  d.ProjectSvc,
+		log:        d.Logger,
+		cfg:        d.Config,
+		workflow:   d.Workflow,
+		validator:  d.Validator,
+		db:         d.DB,
+		taskSvc:    d.TaskSvc,
+		projectSvc: d.ProjectSvc,
 	}
 }
 
