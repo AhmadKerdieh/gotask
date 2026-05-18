@@ -119,15 +119,13 @@ func main() {
 	// Build the HTTP handler. server.NewRouter is the single place routes
 	// and middleware are composed; main just hands over dependencies.
 	handler := server.NewRouter(server.Deps{
-		Config:      cfg,
-		Logger:      log,
-		Workflow:    wf,
-		Validator:   vld,
-		DB:          db,
-		TaskRepo:    taskRepo,
-		ProjectRepo: projectRepo,
-		TaskSvc:     taskSvc,
-		ProjectSvc:  projectSvc,
+		Config:     cfg,
+		Logger:     log,
+		Workflow:   wf,
+		Validator:  vld,
+		DB:         db,
+		TaskSvc:    taskSvc,
+		ProjectSvc: projectSvc,
 	})
 
 	srv := &http.Server{

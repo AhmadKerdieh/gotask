@@ -14,7 +14,6 @@ import (
 	"gotask/internal/database"
 	"gotask/internal/handler"
 	"gotask/internal/middleware"
-	"gotask/internal/repository"
 	"gotask/internal/service"
 	"gotask/internal/validator"
 	"gotask/pkg/response"
@@ -30,15 +29,11 @@ type Deps struct {
 	Workflow  *config.Workflow
 	Validator *validator.Validator
 
-	// DB is carried so the readiness probe can ping it. Repositories are
-	// passed as interfaces — the server and handlers never see the
-	// concrete Postgres types.
-	DB          *database.DB
-	TaskRepo    repository.TaskRepository
-	ProjectRepo repository.ProjectRepository
+	// DB is carried so the readiness probe can ping it. Handlers reach
+	// the data layer only through services now (the raw repos and the
+	// debug probes that used them were removed in Phase 5).
+	DB *database.DB
 
-	// Services hold the business logic. Handlers call these, not the
-	// repositories directly (from Phase 4 onward).
 	TaskSvc    *service.TaskService
 	ProjectSvc *service.ProjectService
 }
@@ -92,15 +87,13 @@ func NewRouter(d Deps) http.Handler {
 	// but for now the dev-only DB probe talks to them directly to prove
 	// the persistence layer works end to end.
 	h := handler.New(handler.Deps{
-		Logger:      d.Logger,
-		Config:      d.Config,
-		Workflow:    d.Workflow,
-		Validator:   d.Validator,
-		DB:          d.DB,
-		TaskRepo:    d.TaskRepo,
-		ProjectRepo: d.ProjectRepo,
-		TaskSvc:     d.TaskSvc,
-		ProjectSvc:  d.ProjectSvc,
+		Logger:     d.Logger,
+		Config:     d.Config,
+		Workflow:   d.Workflow,
+		Validator:  d.Validator,
+		DB:         d.DB,
+		TaskSvc:    d.TaskSvc,
+		ProjectSvc: d.ProjectSvc,
 	})
 
 	// ── API routes ────────────────────────────────────────────────────
@@ -116,38 +109,31 @@ func NewRouter(d Deps) http.Handler {
 		// orchestrators should gate traffic on readiness, not liveness.
 		r.Get("/ready", h.Ready)
 
-		// Workflow introspection — public, read-only, useful for the
-		// frontend to render dropdowns with the legal statuses /
-		// priorities. Kept under /api/v1 (not /debug) because we'll
-		// likely want this in production too.
+		// Workflow introspection — public, read-only. The frontend
+		// renders its status dropdown from this single source of truth
+		// rather than hardcoding the list.
 		r.Get("/workflow", h.GetWorkflow)
 
-		// Debug routes only in development. The condition is checked once
-		// at startup; in production these routes simply do not exist.
-		if d.Config.Env == "development" {
-			r.Route("/debug", func(r chi.Router) {
-				r.Get("/panic", h.DebugPanic)
-				r.Get("/slow", h.DebugSlow)
-				r.Get("/error/{kind}", h.DebugError)
+		// ── Projects ──────────────────────────────────────────────
+		r.Route("/projects", func(r chi.Router) {
+			r.Post("/", h.CreateProject)
+			r.Get("/", h.ListProjects)
+			r.Get("/{id}", h.GetProject)
+		})
 
-				// Phase 2: exercise the validator from the frontend.
-				// POST a JSON body shaped like CreateTaskRequest;
-				// receive either {valid:true} or the field error map.
-				r.Post("/validate", h.DebugValidate)
+		// ── Tasks ─────────────────────────────────────────────────
+		r.Route("/tasks", func(r chi.Router) {
+			r.Post("/", h.CreateTask)
+			r.Get("/", h.ListTasks)
+			r.Get("/{id}", h.GetTask)
+			r.Delete("/{id}", h.DeleteTask)
 
-				// Phase 3: prove the persistence layer works end to end.
-				// These now go through the SERVICE (Phase 4 refactor),
-				// so they exercise the real enforced path.
-				r.Post("/db/seed", h.DebugDBSeed)
-				r.Get("/db/tasks", h.DebugDBListTasks)
-				r.Get("/db/slow-query", h.DebugDBSlowQuery)
-
-				// Phase 4: watch a business rule reject a request.
-				// ?id=<task>&to=<status> — legal transition returns the
-				// updated task; illegal returns 409; unknown status 422.
-				r.Post("/transition", h.DebugTransition)
-			})
-		}
+			// Status is its own sub-resource, not part of a general
+			// task update, because it is the single mutation governed
+			// by the workflow transition rules. One guarded entry
+			// point for that rule.
+			r.Patch("/{id}/status", h.UpdateTaskStatus)
+		})
 	})
 
 	// ── Static frontend ───────────────────────────────────────────────

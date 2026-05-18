@@ -9,777 +9,263 @@
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,800&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #0e0f0d;
-      --bg-2: #16181a;
-      --panel: #111314;
-      --line: #1f2326;
-      --line-2: #2a2f33;
-      --ink: #e6e8e6;
-      --ink-2: #9aa19c;
-      --ink-3: #6a7068;
-      --accent: #c9f56b;
-      --accent-2: #66e6a3;
-      --red: #ff8a73;
-      --amber: #ffd16b;
-      --serif: "Fraunces", ui-serif, Georgia, serif;
-      --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+      --bg:#0e0f0d; --bg-2:#16181a; --panel:#111314; --line:#1f2326; --line-2:#2a2f33;
+      --ink:#e6e8e6; --ink-2:#9aa19c; --ink-3:#6a7068;
+      --accent:#c9f56b; --accent-2:#66e6a3; --red:#ff8a73; --amber:#ffd16b;
+      --serif:"Fraunces",ui-serif,Georgia,serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
     }
-    * { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; }
-    body {
-      background: var(--bg);
-      color: var(--ink);
-      font-family: var(--mono);
-      font-size: 14px;
-      line-height: 1.55;
-      min-height: 100vh;
-      background-image:
-        radial-gradient(1200px 600px at 80% -10%, rgba(201, 245, 107, 0.06), transparent 60%),
-        radial-gradient(900px 500px at -10% 110%, rgba(102, 230, 163, 0.05), transparent 60%);
-    }
-    .shell { max-width: 920px; margin: 0 auto; padding: 56px 28px 80px; }
-
-    header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 56px; }
-    .brand { font-family: var(--serif); font-weight: 800; font-size: 38px; letter-spacing: -0.02em; line-height: 1; }
-    .brand .dot { color: var(--accent); }
-    .meta { font-size: 11px; color: var(--ink-3); letter-spacing: 0.08em; text-transform: uppercase; }
-    .meta b { color: var(--ink); font-weight: 500; }
-
-    .tagline { font-family: var(--serif); font-size: 28px; line-height: 1.25; color: var(--ink); letter-spacing: -0.01em; max-width: 600px; margin: 0 0 8px; }
-    .tagline em { color: var(--accent); font-style: normal; }
-    .sub { color: var(--ink-2); margin: 0 0 36px; font-size: 13px; }
-    .sub code { font-family: var(--mono); color: var(--ink); background: var(--bg-2); padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); }
-
-    /* Cards */
-    .card {
-      border: 1px solid var(--line);
-      background: linear-gradient(180deg, var(--panel), var(--bg-2));
-      border-radius: 14px;
-      overflow: hidden;
-      margin-bottom: 20px;
-    }
-    .card-head {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 14px 18px; border-bottom: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.015);
-    }
-    .card-head .label { font-size: 11px; color: var(--ink-3); letter-spacing: 0.14em; text-transform: uppercase; }
-    .card-body { padding: 16px 18px; }
-
-    .pill {
-      display: inline-flex; align-items: center; gap: 8px;
-      padding: 5px 12px 5px 10px; border-radius: 999px;
-      font-size: 12px; letter-spacing: 0.04em;
-      background: var(--bg-2); color: var(--ink-2); border: 1px solid var(--line-2);
-    }
-    .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); }
-    .pill.ok { color: #0e0f0d; background: var(--accent); border-color: transparent; }
-    .pill.ok::before { background: #0e0f0d; }
-    .pill.err { color: var(--red); border-color: rgba(255, 138, 115, 0.4); }
-    .pill.err::before { background: var(--red); }
-    .pill.warn { color: var(--amber); border-color: rgba(255, 209, 107, 0.4); }
-    .pill.warn::before { background: var(--amber); }
-    .pill.loading::before { animation: pulse 1.1s ease-in-out infinite; }
-    @keyframes pulse { 0%,100% { opacity: 0.35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.15); } }
-
-    .kv { display: grid; grid-template-columns: 130px 1fr; gap: 0; }
-    .kv > div { padding: 10px 18px; border-bottom: 1px solid var(--line); }
-    .kv > div:nth-last-child(-n+2) { border-bottom: 0; }
-    .kv .k { color: var(--ink-3); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
-    .kv .v { color: var(--ink); }
-    .kv .v.muted { color: var(--ink-2); }
-    .kv .v code { font-family: var(--mono); background: var(--bg); padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); font-size: 12.5px; }
-
-    /* Buttons */
-    .btn {
-      font-family: var(--mono); font-size: 12px; color: var(--ink);
-      background: transparent; border: 1px solid var(--line-2);
-      padding: 7px 14px; border-radius: 8px; cursor: pointer;
-      transition: border-color 0.15s, color 0.15s, background 0.15s;
-    }
-    .btn:hover { border-color: var(--accent); color: var(--accent); }
-    .btn:active { transform: translateY(1px); }
-    .btn.danger:hover { border-color: var(--red); color: var(--red); }
-    .btn.warn:hover { border-color: var(--amber); color: var(--amber); }
-    .btn.tiny { padding: 4px 10px; font-size: 11px; }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    .button-grid { display: flex; flex-wrap: wrap; gap: 8px; }
-
-    select.select {
-      font-family: var(--mono); font-size: 12px; color: var(--ink);
-      background: var(--bg-2); border: 1px solid var(--line-2);
-      padding: 6px 12px; border-radius: 8px;
-    }
-
-    /* Raw response */
-    pre.raw-body {
-      margin: 0; padding: 16px 18px; font-family: var(--mono); font-size: 12.5px;
-      color: var(--ink); overflow-x: auto; background: var(--bg); min-height: 60px;
-    }
-    .raw-body .k { color: var(--accent-2); }
-    .raw-body .s { color: var(--accent); }
-    .raw-body .n { color: var(--amber); }
-    .raw-body .b { color: var(--amber); }
-
-    /* Request log table */
-    table.log {
-      width: 100%; border-collapse: collapse; font-size: 12px;
-    }
-    table.log th {
-      text-align: left; padding: 8px 14px; color: var(--ink-3);
-      letter-spacing: 0.1em; text-transform: uppercase; font-size: 10px;
-      font-weight: 500; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, 0.015);
-    }
-    table.log td {
-      padding: 8px 14px; border-bottom: 1px solid var(--line); color: var(--ink-2);
-      font-family: var(--mono); white-space: nowrap;
-    }
-    table.log td:nth-child(5) { white-space: normal; word-break: break-all; }
-    table.log tr:last-child td { border-bottom: 0; }
-    .status-2xx { color: var(--accent-2); }
-    .status-4xx { color: var(--amber); }
-    .status-5xx { color: var(--red); }
-    .status-x { color: var(--ink-3); }
-    .empty { padding: 20px 18px; color: var(--ink-3); font-size: 12px; text-align: center; }
-
-    /* Phase 2: validator playground + workflow viewer */
-    textarea.code-input {
-      width: 100%; min-height: 180px; resize: vertical;
-      background: var(--bg); color: var(--ink); border: 1px solid var(--line-2);
-      border-radius: 8px; padding: 12px; font-family: var(--mono); font-size: 12.5px;
-      line-height: 1.5; tab-size: 2; outline: none;
-    }
-    textarea.code-input:focus { border-color: var(--accent); }
-
-    .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
-    .chip {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 4px 10px; border-radius: 999px;
-      font-size: 11.5px; color: var(--ink-2);
-      background: var(--bg); border: 1px solid var(--line-2);
-    }
-    .chip b { color: var(--ink); font-weight: 500; }
-
-    .wf-grid { display: grid; grid-template-columns: 130px 1fr; gap: 0; }
-    .wf-grid > div { padding: 10px 18px; border-bottom: 1px solid var(--line); }
-    .wf-grid > div:nth-last-child(-n+2) { border-bottom: 0; }
-    .wf-grid .k { color: var(--ink-3); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
-
-    .field-errors { margin: 14px 0 0; display: grid; gap: 6px; }
-    .field-err {
-      display: grid; grid-template-columns: 140px 1fr; gap: 14px;
-      padding: 8px 12px; background: rgba(255, 138, 115, 0.06);
-      border: 1px solid rgba(255, 138, 115, 0.2); border-radius: 6px; font-size: 12px;
-    }
-    .field-err .fname { color: var(--red); font-family: var(--mono); }
-    .field-err .fmsg  { color: var(--ink); }
-    .valid-banner {
-      margin: 14px 0 0; padding: 10px 14px;
-      background: rgba(201, 245, 107, 0.08);
-      border: 1px solid rgba(201, 245, 107, 0.25); border-radius: 8px;
-      color: var(--accent); font-size: 12.5px;
-    }
-
-
-    .phases { margin-top: 48px; }
-    .phases h2 { font-family: var(--serif); font-weight: 600; font-size: 16px; color: var(--ink-2); letter-spacing: 0.02em; margin: 0 0 14px; }
-    .phase-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-    .phase-list li { display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 14px; padding: 10px 14px; border: 1px solid transparent; border-radius: 10px; font-size: 13px; }
-    .phase-list li .num { font-family: var(--mono); color: var(--ink-3); font-size: 11px; }
-    .phase-list li .name { color: var(--ink-2); }
-    .phase-list li .tag { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
-    .phase-list li.current { border-color: var(--line-2); background: rgba(201, 245, 107, 0.04); }
-    .phase-list li.current .num, .phase-list li.current .name { color: var(--ink); }
-    .phase-list li.current .name { font-weight: 500; }
-    .phase-list li.current .tag { color: var(--accent); }
-    .phase-list li.done .name { color: var(--ink-3); text-decoration: line-through; text-decoration-color: var(--line-2); }
-    .phase-list li.done .tag { color: var(--accent-2); }
-
-    footer { margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 11px; letter-spacing: 0.06em; display: flex; justify-content: space-between; }
-
-    @media (max-width: 540px) {
-      .shell { padding: 32px 18px 60px; }
-      .brand { font-size: 30px; }
-      .tagline { font-size: 22px; }
-      .kv { grid-template-columns: 100px 1fr; }
-      table.log td:nth-child(4) { display: none; }
-    }
+    *{box-sizing:border-box}html,body{margin:0;padding:0}
+    body{background:var(--bg);color:var(--ink);font-family:var(--mono);font-size:14px;line-height:1.55;min-height:100vh;
+      background-image:radial-gradient(1200px 600px at 80% -10%,rgba(201,245,107,.06),transparent 60%),radial-gradient(900px 500px at -10% 110%,rgba(102,230,163,.05),transparent 60%);}
+    .shell{max-width:1000px;margin:0 auto;padding:56px 28px 80px}
+    header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:40px}
+    .brand{font-family:var(--serif);font-weight:800;font-size:38px;letter-spacing:-.02em;line-height:1}
+    .brand .dot{color:var(--accent)}
+    .meta{font-size:11px;color:var(--ink-3);letter-spacing:.08em;text-transform:uppercase}
+    .meta b{color:var(--ink);font-weight:500}
+    .tagline{font-family:var(--serif);font-size:26px;line-height:1.25;color:var(--ink);max-width:640px;margin:0 0 8px}
+    .tagline em{color:var(--accent);font-style:normal}
+    .sub{color:var(--ink-2);margin:0 0 32px;font-size:13px}
+    .sub code{font-family:var(--mono);color:var(--ink);background:var(--bg-2);padding:1px 6px;border-radius:4px;border:1px solid var(--line)}
+    .card{border:1px solid var(--line);background:linear-gradient(180deg,var(--panel),var(--bg-2));border-radius:14px;overflow:hidden;margin-bottom:20px}
+    .card-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.015)}
+    .card-head .label{font-size:11px;color:var(--ink-3);letter-spacing:.14em;text-transform:uppercase}
+    .card-body{padding:16px 18px}
+    .pill{display:inline-flex;align-items:center;gap:8px;padding:5px 12px 5px 10px;border-radius:999px;font-size:12px;background:var(--bg-2);color:var(--ink-2);border:1px solid var(--line-2)}
+    .pill::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ink-3)}
+    .pill.ok{color:#0e0f0d;background:var(--accent);border-color:transparent}.pill.ok::before{background:#0e0f0d}
+    .pill.err{color:var(--red);border-color:rgba(255,138,115,.4)}.pill.err::before{background:var(--red)}
+    .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    input.in,select.in{font-family:var(--mono);font-size:12px;color:var(--ink);background:var(--bg);border:1px solid var(--line-2);padding:8px 12px;border-radius:8px;outline:none}
+    input.in:focus,select.in:focus{border-color:var(--accent)}
+    input.in{min-width:160px}
+    .btn{font-family:var(--mono);font-size:12px;color:var(--ink);background:transparent;border:1px solid var(--line-2);padding:8px 14px;border-radius:8px;cursor:pointer;transition:border-color .15s,color .15s}
+    .btn:hover{border-color:var(--accent);color:var(--accent)}.btn:active{transform:translateY(1px)}
+    .btn:disabled{opacity:.5;cursor:not-allowed}
+    .btn.tiny{padding:4px 10px;font-size:11px}
+    table.tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+    table.tbl th{text-align:left;padding:9px 14px;color:var(--ink-3);letter-spacing:.1em;text-transform:uppercase;font-size:10px;font-weight:500;border-bottom:1px solid var(--line);background:rgba(255,255,255,.015)}
+    table.tbl td{padding:9px 14px;border-bottom:1px solid var(--line);color:var(--ink-2);vertical-align:top}
+    table.tbl tr:last-child td{border-bottom:0}
+    .st{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;border:1px solid var(--line-2);color:var(--ink-2)}
+    .st.open{color:var(--accent-2);border-color:rgba(102,230,163,.35)}
+    .st.in_progress{color:var(--amber);border-color:rgba(255,209,107,.35)}
+    .st.done{color:var(--accent);border-color:rgba(201,245,107,.35)}
+    .st.cancelled,.st.blocked{color:var(--red);border-color:rgba(255,138,115,.35)}
+    .empty{padding:22px 18px;color:var(--ink-3);font-size:12px;text-align:center}
+    .toast{margin-top:12px;padding:9px 13px;border-radius:8px;font-size:12px;display:none}
+    .toast.show{display:block}
+    .toast.good{background:rgba(201,245,107,.08);border:1px solid rgba(201,245,107,.25);color:var(--accent)}
+    .toast.bad{background:rgba(255,138,115,.07);border:1px solid rgba(255,138,115,.25);color:var(--red)}
+    footer{margin-top:50px;padding-top:22px;border-top:1px solid var(--line);color:var(--ink-3);font-size:11px;display:flex;justify-content:space-between}
+    .hint{color:var(--ink-3);font-size:11.5px;margin:0 0 12px}
   </style>
 </head>
 <body>
   <div class="shell">
     <header>
       <div class="brand">gotask<span class="dot">.</span></div>
-      <div class="meta">phase <b>04</b> · service layer</div>
+      <div class="meta">phase <b>05</b> · tasks api</div>
     </header>
 
-    <p class="tagline">A minimal task tracker, <em>built from scratch</em> as a course in production Go.</p>
-    <p class="sub">Phase&nbsp;04 adds the business-logic layer: workflow defaults, value legality, and status-transition enforcement — the rules that are neither HTTP nor SQL. Plus the first real unit tests, running with no database.</p>
+    <p class="tagline">A minimal task tracker, <em>now with a real API</em>.</p>
+    <p class="sub">The debug probes are gone. This board talks to the actual REST endpoints: <code>/api/v1/projects</code> and <code>/api/v1/tasks</code>. Status changes go through <code>PATCH /tasks/{id}/status</code>, where the workflow rule still rejects illegal moves.</p>
 
-    <!-- Health card -->
-    <section class="card">
+    <div class="card">
       <div class="card-head">
-        <span class="label">server health</span>
-        <span id="status-pill" class="pill loading">checking…</span>
+        <span class="label">api status</span>
+        <span id="ready" class="pill">checking…</span>
       </div>
-      <div class="kv">
-        <div class="k">endpoint</div><div class="v"><code>GET /api/v1/health</code></div>
-        <div class="k">latency</div><div class="v muted" id="latency">—</div>
-        <div class="k">request id</div><div class="v muted" id="req-id">—</div>
-        <div class="k">service</div><div class="v muted" id="service">—</div>
-        <div class="k">env</div><div class="v muted" id="env">—</div>
-        <div class="k">server time</div><div class="v muted" id="time">—</div>
-      </div>
-    </section>
+    </div>
 
-    <!-- Phase 1 middleware test panel -->
-    <section class="card">
-      <div class="card-head">
-        <span class="label">middleware probes — phase 01</span>
-        <button class="btn tiny" id="clear-log">clear log</button>
+    <!-- Projects -->
+    <div class="card">
+      <div class="card-head"><span class="label">projects</span>
+        <button class="btn tiny" id="reload-proj">reload</button>
       </div>
       <div class="card-body">
-        <p style="color:var(--ink-2); font-size:12.5px; margin:0 0 14px;">
-          Each button hits a development-only endpoint to exercise one piece of
-          the middleware stack. Every response carries an <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">X-Request-ID</code> header you can correlate with the server logs.
-        </p>
-        <div class="button-grid">
-          <button class="btn"        data-probe="health">health</button>
-          <button class="btn"        data-probe="404">404 unknown route</button>
-          <button class="btn warn"   data-probe="405">405 wrong method</button>
-          <button class="btn danger" data-probe="panic">panic → 500</button>
-          <button class="btn warn"   data-probe="slow">slow → 504 (waits 16s)</button>
-          <select class="select" id="error-kind">
-            <option value="bad_request">bad_request</option>
-            <option value="unauthorized">unauthorized</option>
-            <option value="forbidden">forbidden</option>
-            <option value="not_found">not_found</option>
-            <option value="conflict">conflict</option>
-            <option value="validation">validation</option>
-            <option value="timeout">timeout</option>
-            <option value="internal">internal</option>
-          </select>
-          <button class="btn" data-probe="error">trigger error</button>
+        <p class="hint">A task must belong to a project. Create one, then it appears in the task form's project picker.</p>
+        <div class="row">
+          <input class="in" id="p-key" placeholder="KEY (e.g. GOTASK)" maxlength="10">
+          <input class="in" id="p-name" placeholder="Project name" style="flex:1">
+          <button class="btn" id="p-create">create project</button>
         </div>
+        <div id="p-toast" class="toast"></div>
       </div>
-    </section>
-
-    <!-- Request log -->
-    <section class="card">
-      <div class="card-head">
-        <span class="label">request log (newest first)</span>
-        <span class="pill" id="log-count">0</span>
-      </div>
-      <table class="log" id="log-table">
-        <thead>
-          <tr>
-            <th style="width:80px">time</th>
-            <th style="width:60px">method</th>
-            <th>path</th>
-            <th style="width:60px">status</th>
-            <th style="width:240px">request id</th>
-            <th style="width:80px">latency</th>
-          </tr>
-        </thead>
-        <tbody id="log-body">
-          <tr><td colspan="6" class="empty">no requests yet — click a button above</td></tr>
-        </tbody>
+      <table class="tbl"><thead><tr><th style="width:120px">key</th><th>name</th><th style="width:230px">id</th></tr></thead>
+        <tbody id="p-body"><tr><td colspan="3" class="empty">no projects yet</td></tr></tbody>
       </table>
-    </section>
+    </div>
 
-    <!-- Raw response -->
-    <section class="card">
-      <div class="card-head">
-        <span class="label">last response · raw body</span>
-        <span class="pill" id="last-status">—</span>
-      </div>
-      <pre class="raw-body" id="raw">—</pre>
-    </section>
-
-    <!-- Phase 2: workflow viewer -->
-    <section class="card">
-      <div class="card-head">
-        <span class="label">workflow — loaded from workflow.yaml</span>
-        <button class="btn tiny" id="refresh-workflow">refresh</button>
-      </div>
-      <div class="wf-grid" id="wf-grid">
-        <div class="k">statuses</div>      <div class="v"><div class="chip-row" id="wf-statuses">—</div></div>
-        <div class="k">terminal</div>      <div class="v"><div class="chip-row" id="wf-terminal">—</div></div>
-        <div class="k">priorities</div>    <div class="v"><div class="chip-row" id="wf-priorities">—</div></div>
-        <div class="k">defaults</div>      <div class="v"><div class="chip-row" id="wf-defaults">—</div></div>
-        <div class="k">transitions</div>   <div class="v" id="wf-transitions">—</div>
-      </div>
-    </section>
-
-    <!-- Phase 2: validator playground -->
-    <section class="card">
-      <div class="card-head">
-        <span class="label">validator playground — phase 02</span>
-        <span class="pill" id="validator-pill">idle</span>
-      </div>
+    <!-- Create task -->
+    <div class="card">
+      <div class="card-head"><span class="label">new task</span></div>
       <div class="card-body">
-        <p style="color:var(--ink-2); font-size:12.5px; margin:0 0 12px;">
-          POST to <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">/api/v1/debug/validate</code> with a payload shaped like the future <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">CreateTaskRequest</code>. The server runs it through <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">validator.Struct</code>; you see field-level errors or a parsed echo.
-        </p>
-        <textarea class="code-input" id="validate-body">{
-  "project_id": "5b1a3b1c-0c0e-4a4a-9a9a-1f1f1f1f1f1f",
-  "title": "Wire up auth",
-  "description": "Implement OIDC login with PKCE.",
-  "status": "open",
-  "priority": "high"
-}</textarea>
-        <div class="button-grid" style="margin-top: 12px;">
-          <button class="btn" id="validate-btn">validate</button>
-          <button class="btn tiny" data-preset="valid">load valid example</button>
-          <button class="btn tiny" data-preset="missing">load missing fields</button>
-          <button class="btn tiny" data-preset="bad-enum">load bad status/priority</button>
-          <button class="btn tiny" data-preset="too-long">load oversize title</button>
-          <button class="btn tiny" data-preset="unknown">load unknown field</button>
-        </div>
-        <div id="validate-result"></div>
-      </div>
-    </section>
-
-    <!-- Phase 3: persistence probe -->
-    <section class="card">
-      <div class="card-head">
-        <span class="label">persistence — phase 03</span>
-        <span class="pill" id="ready-pill">checking…</span>
-      </div>
-      <div class="card-body">
-        <p style="color:var(--ink-2); font-size:12.5px; margin:0 0 12px;">
-          These hit the <em>real</em> repository layer against the <em>real</em> Postgres database.
-          <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">GET /api/v1/ready</code> is the readiness probe (distinct from liveness): it round-trips the database. Seed creates a project + task; the slow query proves the request context aborts an in-flight query server-side.
-        </p>
-        <div class="button-grid">
-          <button class="btn" data-dbprobe="ready">check readiness</button>
-          <button class="btn" data-dbprobe="seed">seed project + task</button>
-          <button class="btn" data-dbprobe="list">list tasks</button>
-          <button class="btn warn" data-dbprobe="slow">slow query (20s → 504)</button>
-        </div>
-        <div id="db-result" style="margin-top:14px;"></div>
-      </div>
-    </section>
-
-    <!-- Phase 4: transition tester -->
-    <section class="card">
-      <div class="card-head">
-        <span class="label">transition tester — phase 04</span>
-        <span class="pill" id="trans-pill">idle</span>
-      </div>
-      <div class="card-body">
-        <p style="color:var(--ink-2); font-size:12.5px; margin:0 0 12px;">
-          The service enforces <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">workflow.yaml</code> transitions. Seed a task above to get an id, paste it here, pick a target status, and watch a business rule accept or reject the change. Legal → updated task. Illegal → <b>409 invalid_transition</b>. Unknown status → <b>422</b>. A new task starts in <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">open</code>; try <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">in_progress</code> (legal) then <code style="font-family:var(--mono); color:var(--ink); background:var(--bg-2); padding:1px 6px; border-radius:4px; border:1px solid var(--line);">done</code> from open (illegal — skips the chain).
-        </p>
-        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-          <input id="trans-id" type="text" placeholder="task uuid (from seed result)"
-            style="flex:1; min-width:280px; font-family:var(--mono); font-size:12px; color:var(--ink); background:var(--bg); border:1px solid var(--line-2); padding:7px 12px; border-radius:8px;">
-          <select class="select" id="trans-to">
-            <option value="open">open</option>
-            <option value="in_progress" selected>in_progress</option>
-            <option value="in_review">in_review</option>
-            <option value="done">done</option>
-            <option value="cancelled">cancelled</option>
-            <option value="banana">banana (unknown)</option>
+        <div class="row">
+          <select class="in" id="t-project"><option value="">— pick a project —</option></select>
+          <input class="in" id="t-title" placeholder="Task title" style="flex:1">
+          <select class="in" id="t-priority">
+            <option value="">priority (default)</option>
+            <option value="low">low</option><option value="medium">medium</option>
+            <option value="high">high</option><option value="critical">critical</option>
           </select>
-          <button class="btn" id="trans-btn">attempt transition</button>
+          <button class="btn" id="t-create">create task</button>
         </div>
-        <div id="trans-result" style="margin-top:14px;"></div>
+        <p class="hint" style="margin:12px 0 0">Status is omitted on purpose — the service applies the workflow default (<code>open</code>). That's a business rule, not a frontend default.</p>
+        <div id="t-toast" class="toast"></div>
       </div>
-    </section>
+    </div>
 
-    <section class="phases">
-      <h2>course progress</h2>
-      <ul class="phase-list">
-        <li class="done">
-          <span class="num">00</span>
-          <span class="name">Scaffold, config, logger, response envelope, health</span>
-          <span class="tag">complete</span>
-        </li>
-        <li class="done">
-          <span class="num">01</span>
-          <span class="name">HTTP routing (chi), middleware stack, typed errors</span>
-          <span class="tag">complete</span>
-        </li>
-        <li class="done">
-          <span class="num">02</span>
-          <span class="name">Domain models &amp; validation (workflow.yaml)</span>
-          <span class="tag">complete</span>
-        </li>
-        <li class="done">
-          <span class="num">03</span>
-          <span class="name">Postgres, migrations, repositories</span>
-          <span class="tag">complete</span>
-        </li>
-        <li class="current">
-          <span class="num">04</span>
-          <span class="name">Service layer, DI, unit tests with mocks</span>
-          <span class="tag">in progress</span>
-        </li>
-        <li><span class="num">05</span><span class="name">Tasks REST API + integration tests</span><span class="tag">next</span></li>
-        <li><span class="num">06</span><span class="name">Keycloak auth (OIDC + PKCE)</span><span class="tag"></span></li>
-        <li><span class="num">07</span><span class="name">Authorization, roles, audit log</span><span class="tag"></span></li>
-        <li><span class="num">08</span><span class="name">Goroutines, channels, worker pools</span><span class="tag"></span></li>
-        <li><span class="num">09</span><span class="name">Observability &amp; production hardening</span><span class="tag"></span></li>
-        <li><span class="num">10</span><span class="name">Testing strategy, Docker, CI/CD</span><span class="tag"></span></li>
-      </ul>
-    </section>
+    <!-- Tasks -->
+    <div class="card">
+      <div class="card-head"><span class="label">tasks</span>
+        <div class="row">
+          <select class="in" id="f-status"><option value="">all statuses</option></select>
+          <button class="btn tiny" id="reload-tasks">reload</button>
+        </div>
+      </div>
+      <table class="tbl">
+        <thead><tr><th>title</th><th style="width:120px">status</th><th style="width:90px">priority</th><th style="width:260px">change status</th><th style="width:60px"></th></tr></thead>
+        <tbody id="t-body"><tr><td colspan="5" class="empty">no tasks yet</td></tr></tbody>
+      </table>
+    </div>
 
     <footer>
-      <span>gotask · go 1.22+ · chi v5 · pgx v5</span>
-      <span>phase 04</span>
+      <span>gotask · go 1.22+ · chi v5 · pgx v5 · phase 05</span>
+      <span>real REST API</span>
     </footer>
   </div>
 
   <script>
-    const $ = (id) => document.getElementById(id);
-    const API = "/api/v1";
+    const $=id=>document.getElementById(id);
+    const API="/api/v1";
+    let WF=null;
 
-    // Lightweight JSON syntax highlighting.
-    function highlight(json) {
-      const s = typeof json === "string" ? json : JSON.stringify(json, null, 2);
-      return s
-        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-        .replace(/"([^"\\]*(?:\\.[^"\\]*)*)"(\s*:)/g, '<span class="k">"$1"</span>$2')
-        .replace(/:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g, ': <span class="s">"$1"</span>')
-        .replace(/:\s*(-?\d+\.?\d*)/g, ': <span class="n">$1</span>')
-        .replace(/:\s*(true|false|null)/g, ': <span class="b">$1</span>');
+    async function api(method,path,body){
+      const opt={method,headers:{},cache:"no-store"};
+      if(body!==undefined){opt.headers["Content-Type"]="application/json";opt.body=JSON.stringify(body);}
+      const res=await fetch(API+path,opt);
+      let data=null;
+      const txt=await res.text();
+      if(txt){try{data=JSON.parse(txt);}catch{data=txt;}}
+      return {status:res.status,ok:res.ok,data};
+    }
+    function toast(el,msg,good){el.textContent=msg;el.className="toast show "+(good?"good":"bad");
+      setTimeout(()=>{el.className="toast";},4000);}
+
+    async function loadReady(){
+      const r=await api("GET","/ready");
+      const p=$("ready");
+      if(r.status===200){p.className="pill ok";p.textContent="ready · db ok";}
+      else if(r.status===503){p.className="pill err";p.textContent="not ready · db down";}
+      else{p.className="pill err";p.textContent="offline";}
     }
 
-    // Request log state — kept in memory only.
-    const logEntries = [];
-    function addLogEntry(entry) {
-      logEntries.unshift(entry);
-      if (logEntries.length > 20) logEntries.length = 20;
-      renderLog();
-    }
-    function renderLog() {
-      const tb = $("log-body");
-      $("log-count").textContent = String(logEntries.length);
-      if (logEntries.length === 0) {
-        tb.innerHTML = '<tr><td colspan="6" class="empty">no requests yet — click a button above</td></tr>';
-        return;
-      }
-      tb.innerHTML = logEntries.map(e => {
-        const cls = e.status >= 500 ? "status-5xx"
-                  : e.status >= 400 ? "status-4xx"
-                  : e.status >= 200 ? "status-2xx"
-                  : "status-x";
-        const id = e.requestId ? e.requestId : "—";
-        return `<tr>
-          <td>${e.time}</td>
-          <td>${e.method}</td>
-          <td>${e.path}</td>
-          <td class="${cls}">${e.status || "—"}</td>
-          <td title="${id}">${id}</td>
-          <td>${e.latency} ms</td>
-        </tr>`;
-      }).join("");
-    }
-    $("clear-log").addEventListener("click", () => { logEntries.length = 0; renderLog(); });
-
-    // Central fetch wrapper: times the request, logs it, updates the raw panel.
-    async function call(method, path, label) {
-      const started = performance.now();
-      const time = new Date().toTimeString().slice(0, 8);
-      let status = 0, requestId = "", body = "(no body)";
-
-      try {
-        const res = await fetch(path, { method, cache: "no-store" });
-        status = res.status;
-        requestId = res.headers.get("x-request-id") || "";
-
-        const text = await res.text();
-        try { body = JSON.parse(text); } catch { body = text || "(empty)"; }
-      } catch (e) {
-        body = String(e);
-      }
-
-      const latency = Math.round(performance.now() - started);
-      addLogEntry({ time, method, path, status, requestId, latency });
-
-      $("raw").innerHTML = highlight(body);
-      const pill = $("last-status");
-      pill.textContent = status ? `${method} ${status}` : `${method} ERR`;
-      pill.className = "pill " + (status >= 500 ? "err" : status >= 400 ? "warn" : status >= 200 ? "ok" : "err");
-
-      return { status, requestId, body };
-    }
-
-    // The dedicated health refresh updates the top card.
-    async function refreshHealth() {
-      $("status-pill").className = "pill loading";
-      $("status-pill").textContent = "checking…";
-
-      const r = await call("GET", `${API}/health`, "health");
-
-      if (r.status === 200 && r.body && r.body.success) {
-        $("status-pill").className = "pill ok";
-        $("status-pill").textContent = "healthy";
-        $("latency").textContent = (logEntries[0]?.latency ?? "—") + " ms";
-        $("req-id").textContent = r.requestId || "—";
-        $("service").textContent = r.body.data?.service ?? "—";
-        $("env").textContent = r.body.data?.env ?? "—";
-        $("time").textContent = r.body.data?.time ?? "—";
-      } else {
-        $("status-pill").className = "pill err";
-        $("status-pill").textContent = r.status === 0 ? "offline" : "unhealthy";
+    async function loadWorkflow(){
+      const r=await api("GET","/workflow");
+      if(r.status===200&&r.data&&r.data.success){
+        WF=r.data.data;
+        const fs=$("f-status");
+        WF.statuses.forEach(s=>{const o=document.createElement("option");o.value=s;o.textContent=s;fs.appendChild(o);});
       }
     }
 
-    // Probe dispatcher.
-    document.querySelectorAll("[data-probe]").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const probe = btn.getAttribute("data-probe");
-        btn.disabled = true;
-        try {
-          switch (probe) {
-            case "health": await refreshHealth(); break;
-            case "404":    await call("GET",  `${API}/this-route-does-not-exist`); break;
-            case "405":    await call("POST", `${API}/health`); break;
-            case "panic":  await call("GET",  `${API}/debug/panic`); break;
-            case "slow":   await call("GET",  `${API}/debug/slow?ms=16000`); break;
-            case "error": {
-              const kind = $("error-kind").value;
-              await call("GET", `${API}/debug/error/${kind}`);
-              break;
-            }
-          }
-        } finally {
-          btn.disabled = false;
-        }
+    function projOption(p){const o=document.createElement("option");o.value=p.id;o.textContent=p.key+" — "+p.name;return o;}
+
+    async function loadProjects(){
+      const r=await api("GET","/projects");
+      const tb=$("p-body"),sel=$("t-project");
+      sel.length=1;
+      if(r.status===200&&r.data&&r.data.success){
+        const ps=r.data.data;
+        if(!ps.length){tb.innerHTML='<tr><td colspan="3" class="empty">no projects yet</td></tr>';return;}
+        tb.innerHTML=ps.map(p=>`<tr><td><b style="color:var(--ink)">${p.key}</b></td><td>${p.name}</td><td style="font-size:11px">${p.id}</td></tr>`).join("");
+        ps.forEach(p=>sel.appendChild(projOption(p)));
+      }
+    }
+
+    function statusCell(s){return `<span class="st ${s}">${s}</span>`;}
+
+    function transitionControls(t){
+      // Offer every known status; the server enforces which are legal.
+      // An illegal pick returns 409 and we surface it — that's the point.
+      const opts=WF?WF.statuses.map(s=>`<option value="${s}"${s===t.status?" selected":""}>${s}</option>`).join(""):"";
+      return `<div class="row">
+        <select class="in tg-sel" data-id="${t.id}" style="min-width:130px">${opts}</select>
+        <button class="btn tiny tg-go" data-id="${t.id}">apply</button></div>`;
+    }
+
+    async function loadTasks(){
+      const st=$("f-status").value;
+      const r=await api("GET","/tasks"+(st?`?status=${encodeURIComponent(st)}`:""));
+      const tb=$("t-body");
+      if(r.status===200&&r.data&&r.data.success){
+        const ts=r.data.data;
+        if(!ts.length){tb.innerHTML='<tr><td colspan="5" class="empty">no tasks yet</td></tr>';return;}
+        tb.innerHTML=ts.map(t=>`<tr>
+          <td><b style="color:var(--ink)">${t.title}</b><div style="font-size:11px;color:var(--ink-3)">${t.id}</div></td>
+          <td>${statusCell(t.status)}</td>
+          <td>${t.priority}</td>
+          <td>${transitionControls(t)}</td>
+          <td><button class="btn tiny tg-del" data-id="${t.id}">delete</button></td>
+        </tr>`).join("");
+        bindTaskRowActions();
+      }
+    }
+
+    function bindTaskRowActions(){
+      document.querySelectorAll(".tg-go").forEach(b=>b.onclick=async()=>{
+        const id=b.dataset.id;
+        const sel=document.querySelector(`.tg-sel[data-id="${id}"]`);
+        b.disabled=true;
+        const r=await api("PATCH",`/tasks/${id}/status`,{status:sel.value});
+        b.disabled=false;
+        if(r.status===200){toast($("t-toast"),"status updated",true);loadTasks();}
+        else if(r.status===409){toast($("t-toast"),"rejected: "+(r.data?.error?.message||"illegal transition"),false);}
+        else if(r.status===422){toast($("t-toast"),"unknown status",false);}
+        else{toast($("t-toast"),"error "+r.status,false);}
       });
-    });
-
-    // ── Phase 2: workflow viewer ──────────────────────────────────────
-    async function refreshWorkflow() {
-      const r = await call("GET", `${API}/workflow`);
-      if (r.status !== 200 || !r.body || !r.body.success) return;
-      const d = r.body.data;
-
-      const chips = (arr, kind="") => arr.map(s =>
-        `<span class="chip"><b>${s}</b>${kind ? ` <span style="color:var(--ink-3)">${kind}</span>` : ""}</span>`
-      ).join("");
-
-      $("wf-statuses").innerHTML   = chips(d.statuses || []);
-      $("wf-terminal").innerHTML   = chips(d.terminal_statuses || []) || '<span class="chip" style="color:var(--ink-3)">none</span>';
-      $("wf-priorities").innerHTML = chips(d.priorities || []);
-      $("wf-defaults").innerHTML   = chips([`status: ${d.default_status}`, `priority: ${d.default_priority}`]);
-
-      // Transitions get rendered as a table of "from → [to, to]" rows.
-      const rows = Object.entries(d.transitions || {}).map(([from, to]) => {
-        const toChips = (to && to.length)
-          ? to.map(t => `<span class="chip"><b>${t}</b></span>`).join(" ")
-          : '<span class="chip" style="color:var(--ink-3)">(terminal — no exits)</span>';
-        return `<div style="display:flex; align-items:center; gap:10px; padding:4px 0;">
-          <span class="chip" style="background:var(--bg-2)"><b>${from}</b></span>
-          <span style="color:var(--ink-3)">→</span>
-          <div class="chip-row">${toChips}</div>
-        </div>`;
-      }).join("");
-      $("wf-transitions").innerHTML = rows || "—";
+      document.querySelectorAll(".tg-del").forEach(b=>b.onclick=async()=>{
+        const id=b.dataset.id;b.disabled=true;
+        const r=await api("DELETE",`/tasks/${id}`);
+        b.disabled=false;
+        if(r.status===204){toast($("t-toast"),"task deleted",true);loadTasks();}
+        else{toast($("t-toast"),"delete failed ("+r.status+")",false);}
+      });
     }
-    $("refresh-workflow").addEventListener("click", refreshWorkflow);
 
-    // ── Phase 2: validator playground ─────────────────────────────────
-    const presets = {
-      valid: {
-        project_id: "5b1a3b1c-0c0e-4a4a-9a9a-1f1f1f1f1f1f",
-        title: "Wire up auth",
-        description: "Implement OIDC login with PKCE.",
-        status: "open",
-        priority: "high"
-      },
-      missing: {
-        // omit project_id and title; status/priority blank
-        description: "no title, no project — should fail required checks"
-      },
-      "bad-enum": {
-        project_id: "5b1a3b1c-0c0e-4a4a-9a9a-1f1f1f1f1f1f",
-        title: "test",
-        status: "almost_done",        // not in workflow
-        priority: "urgent"            // not in workflow
-      },
-      "too-long": {
-        project_id: "5b1a3b1c-0c0e-4a4a-9a9a-1f1f1f1f1f1f",
-        title: "x".repeat(250),
-        priority: "medium"
-      },
-      unknown: {
-        project_id: "5b1a3b1c-0c0e-4a4a-9a9a-1f1f1f1f1f1f",
-        title: "test",
-        gotcha: "this field doesn't exist on the DTO"
-      }
+    $("p-create").onclick=async()=>{
+      const key=$("p-key").value.trim(),name=$("p-name").value.trim();
+      if(!key||!name){toast($("p-toast"),"key and name are required",false);return;}
+      const r=await api("POST","/projects",{key,name,description:""});
+      if(r.status===201){toast($("p-toast"),"project created",true);$("p-key").value="";$("p-name").value="";loadProjects();}
+      else if(r.status===409){toast($("p-toast"),"a project with that key already exists",false);}
+      else if(r.status===422){toast($("p-toast"),"validation: "+JSON.stringify(r.data?.error?.fields||{}),false);}
+      else{toast($("p-toast"),"error "+r.status,false);}
     };
-    document.querySelectorAll("[data-preset]").forEach(b => {
-      b.addEventListener("click", () => {
-        const name = b.getAttribute("data-preset");
-        $("validate-body").value = JSON.stringify(presets[name], null, 2);
-        $("validate-result").innerHTML = "";
-      });
-    });
 
-    async function runValidate() {
-      const pill = $("validator-pill");
-      pill.className = "pill loading";
-      pill.textContent = "validating…";
-      $("validate-result").innerHTML = "";
+    $("t-create").onclick=async()=>{
+      const project_id=$("t-project").value,title=$("t-title").value.trim();
+      if(!project_id){toast($("t-toast"),"pick a project first",false);return;}
+      if(!title){toast($("t-toast"),"title is required",false);return;}
+      const body={project_id,title,description:""};
+      const pr=$("t-priority").value;if(pr)body.priority=pr;
+      const r=await api("POST","/tasks",body);
+      if(r.status===201){toast($("t-toast"),"task created (status: "+r.data.data.status+")",true);$("t-title").value="";loadTasks();}
+      else if(r.status===422){toast($("t-toast"),"validation: "+JSON.stringify(r.data?.error?.fields||{}),false);}
+      else{toast($("t-toast"),"error "+r.status,false);}
+    };
 
-      const raw = $("validate-body").value;
-      // Send the raw text directly so the server sees exactly what the
-      // user typed (including malformed JSON, to exercise the 400 path).
-      const started = performance.now();
-      const time = new Date().toTimeString().slice(0, 8);
-      let status = 0, requestId = "", body = "";
+    $("reload-proj").onclick=loadProjects;
+    $("reload-tasks").onclick=loadTasks;
+    $("f-status").onchange=loadTasks;
 
-      try {
-        const res = await fetch(`${API}/debug/validate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: raw,
-          cache: "no-store"
-        });
-        status = res.status;
-        requestId = res.headers.get("x-request-id") || "";
-        const text = await res.text();
-        try { body = JSON.parse(text); } catch { body = text; }
-      } catch (e) {
-        body = String(e);
-      }
-
-      const latency = Math.round(performance.now() - started);
-      addLogEntry({ time, method: "POST", path: `${API}/debug/validate`, status, requestId, latency });
-      $("raw").innerHTML = highlight(body);
-      $("last-status").textContent = `POST ${status}`;
-      $("last-status").className = "pill " + (status === 200 ? "ok" : status === 422 ? "warn" : "err");
-
-      // Update the dedicated validator pill + result panel.
-      const result = $("validate-result");
-      if (status === 200 && body && body.success) {
-        pill.className = "pill ok";
-        pill.textContent = "valid";
-        result.innerHTML = `<div class="valid-banner">payload is structurally valid — server echoed it back</div>`;
-      } else if (status === 422 && body && body.error && body.error.fields) {
-        pill.className = "pill warn";
-        pill.textContent = "422 validation failed";
-        const rows = Object.entries(body.error.fields)
-          .map(([f, m]) => `<div class="field-err"><span class="fname">${f}</span><span class="fmsg">${m}</span></div>`)
-          .join("");
-        result.innerHTML = `<div class="field-errors">${rows}</div>`;
-      } else if (status === 400) {
-        pill.className = "pill err";
-        pill.textContent = "400 bad json";
-        result.innerHTML = `<div class="field-errors"><div class="field-err"><span class="fname">body</span><span class="fmsg">${body && body.error ? body.error.message : "could not parse JSON"}</span></div></div>`;
-      } else {
-        pill.className = "pill err";
-        pill.textContent = `error ${status || "—"}`;
-      }
-    }
-    $("validate-btn").addEventListener("click", runValidate);
-
-    // ── Phase 3: persistence probe ────────────────────────────────────
-    async function refreshReady() {
-      const pill = $("ready-pill");
-      pill.className = "pill loading";
-      pill.textContent = "checking…";
-      const r = await call("GET", `${API}/ready`);
-      if (r.status === 200 && r.body && r.body.success) {
-        pill.className = "pill ok";
-        pill.textContent = "ready · db ok";
-      } else if (r.status === 503) {
-        pill.className = "pill err";
-        pill.textContent = "not ready · db down";
-      } else {
-        pill.className = "pill err";
-        pill.textContent = r.status === 0 ? "offline" : `error ${r.status}`;
-      }
-    }
-
-    function renderDBResult(title, body, status) {
-      const cls = status >= 500 ? "status-5xx" : status >= 400 ? "status-4xx" : "status-2xx";
-      $("db-result").innerHTML =
-        `<div style="font-size:11px; color:var(--ink-3); letter-spacing:0.1em; text-transform:uppercase; margin-bottom:6px;">${title} · <span class="${cls}">${status}</span></div>` +
-        `<pre class="raw-body" style="border:1px solid var(--line); border-radius:8px;">${highlight(body)}</pre>`;
-    }
-
-    document.querySelectorAll("[data-dbprobe]").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const probe = btn.getAttribute("data-dbprobe");
-        btn.disabled = true;
-        try {
-          if (probe === "ready") {
-            await refreshReady();
-            const r = await call("GET", `${API}/ready`);
-            renderDBResult("GET /api/v1/ready", r.body, r.status);
-          } else if (probe === "seed") {
-            const r = await call("POST", `${API}/debug/db/seed`);
-            renderDBResult("POST /api/v1/debug/db/seed", r.body, r.status);
-            // Convenience: drop the freshly created task id straight
-            // into the Phase 4 transition tester so you can act on it
-            // without copy-pasting.
-            if (r.status === 201 && r.body && r.body.data && r.body.data.task) {
-              const tid = r.body.data.task.ID || r.body.data.task.id;
-              if (tid) $("trans-id").value = tid;
-            }
-          } else if (probe === "list") {
-            const r = await call("GET", `${API}/debug/db/tasks`);
-            renderDBResult("GET /api/v1/debug/db/tasks", r.body, r.status);
-          } else if (probe === "slow") {
-            const r = await call("GET", `${API}/debug/db/slow-query?seconds=20`);
-            renderDBResult("GET /api/v1/debug/db/slow-query?seconds=20", r.body, r.status);
-          }
-        } finally {
-          btn.disabled = false;
-        }
-      });
-    });
-
-    // ── Phase 4: transition tester ────────────────────────────────────
-    $("trans-btn").addEventListener("click", async () => {
-      const pill = $("trans-pill");
-      const id = $("trans-id").value.trim();
-      const to = $("trans-to").value;
-      const out = $("trans-result");
-
-      if (!id) {
-        pill.className = "pill err";
-        pill.textContent = "need a task id";
-        out.innerHTML = `<div class="field-errors"><div class="field-err"><span class="fname">id</span><span class="fmsg">seed a task first, then its id auto-fills here</span></div></div>`;
-        return;
-      }
-
-      pill.className = "pill loading";
-      pill.textContent = "attempting…";
-      out.innerHTML = "";
-
-      const url = `${API}/debug/transition?id=${encodeURIComponent(id)}&to=${encodeURIComponent(to)}`;
-      const r = await call("POST", url);
-
-      const cls = r.status >= 500 ? "status-5xx" : r.status >= 400 ? "status-4xx" : "status-2xx";
-      out.innerHTML =
-        `<div style="font-size:11px; color:var(--ink-3); letter-spacing:0.1em; text-transform:uppercase; margin-bottom:6px;">POST /api/v1/debug/transition?to=${to} · <span class="${cls}">${r.status}</span></div>` +
-        `<pre class="raw-body" style="border:1px solid var(--line); border-radius:8px;">${highlight(r.body)}</pre>`;
-
-      if (r.status === 200) {
-        pill.className = "pill ok";
-        pill.textContent = "transition allowed";
-      } else if (r.status === 409) {
-        pill.className = "pill warn";
-        pill.textContent = "409 rejected by rule";
-      } else if (r.status === 422) {
-        pill.className = "pill warn";
-        pill.textContent = "422 unknown status";
-      } else {
-        pill.className = "pill err";
-        pill.textContent = `error ${r.status}`;
-      }
-    });
-
-    // Initial health check on load.
-    refreshHealth();
-    refreshWorkflow();
-    refreshReady();
+    (async function(){
+      await loadReady();
+      await loadWorkflow();
+      await loadProjects();
+      await loadTasks();
+    })();
   </script>
 </body>
 </html>

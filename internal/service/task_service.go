@@ -11,7 +11,7 @@ import (
 )
 
 // CreateTaskInput is the service-level input for creating a task. It is
-// distinct from repository.NewTaskInput (persistence shape) and from any
+// distinct from domain.NewTaskInput (persistence shape) and from any
 // HTTP DTO (wire shape). The service accepts this, applies business
 // rules, and converts to the repository input itself.
 //
@@ -134,7 +134,7 @@ func (s *TaskService) List(ctx context.Context, f repository.TaskFilter) ([]doma
 //  2. validate the requested status is even a known value
 //  3. ask the workflow whether old -> new is a legal transition
 //     (this also rejects moves out of terminal statuses and no-op
-//     self-transitions, by the workflow's own rules)
+//      self-transitions, by the workflow's own rules)
 //  4. only then write
 func (s *TaskService) UpdateStatus(ctx context.Context, id uuid.UUID, to domain.Status) (domain.Task, error) {
 	current, err := s.tasks.GetByID(ctx, id)
