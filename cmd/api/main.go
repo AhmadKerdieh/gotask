@@ -18,6 +18,7 @@ import (
 
 	"gotask/internal/config"
 	"gotask/internal/database"
+	"gotask/internal/middleware"
 	"gotask/internal/repository"
 	"gotask/internal/server"
 	"gotask/internal/service"
@@ -116,6 +117,30 @@ func main() {
 	taskSvc := service.NewTaskService(svcDeps)
 	projectSvc := service.NewProjectService(svcDeps)
 
+	// Construct the OIDC authenticator. This performs OIDC discovery
+	// against the Keycloak realm issuer — one network call, here at
+	// startup, NOT per request. A failure is fatal: an app that cannot
+	// establish how to verify tokens must not serve protected traffic.
+	//
+	// Note this means Keycloak must be reachable at startup. If you see
+	// this fail, the realm isn't up yet — `make kc-up` and wait for it to
+	// be healthy before `make run` (the Makefile target waits for you).
+	authCtx, authCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	auth, err := middleware.NewAuthenticator(authCtx, cfg.OIDCIssuer, cfg.OIDCClientID)
+	authCancel()
+	if err != nil {
+		log.Error("oidc discovery failed",
+			"error", err,
+			"issuer", cfg.OIDCIssuer,
+			"hint", "is Keycloak running and the realm imported? (make kc-up)",
+		)
+		os.Exit(1)
+	}
+	log.Info("oidc authenticator ready",
+		"issuer", cfg.OIDCIssuer,
+		"client_id", cfg.OIDCClientID,
+	)
+
 	// Build the HTTP handler. server.NewRouter is the single place routes
 	// and middleware are composed; main just hands over dependencies.
 	handler := server.NewRouter(server.Deps{
@@ -126,6 +151,7 @@ func main() {
 		DB:         db,
 		TaskSvc:    taskSvc,
 		ProjectSvc: projectSvc,
+		Auth:       auth,
 	})
 
 	srv := &http.Server{

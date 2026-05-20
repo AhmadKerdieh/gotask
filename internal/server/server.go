@@ -36,6 +36,12 @@ type Deps struct {
 
 	TaskSvc    *service.TaskService
 	ProjectSvc *service.ProjectService
+
+	// Auth is the OIDC authenticator. Its Middleware guards the protected
+	// route group; public routes (health/ready/workflow/static) are
+	// mounted OUTSIDE that group so a load balancer probing /ready never
+	// needs a token.
+	Auth *middleware.Authenticator
 }
 
 // NewRouter assembles the middleware chain and the route table and returns
@@ -109,30 +115,45 @@ func NewRouter(d Deps) http.Handler {
 		// orchestrators should gate traffic on readiness, not liveness.
 		r.Get("/ready", h.Ready)
 
-		// Workflow introspection — public, read-only. The frontend
-		// renders its status dropdown from this single source of truth
-		// rather than hardcoding the list.
+		// Workflow introspection — public, read-only. The frontend needs
+		// the status list to render its UI BEFORE the user has logged in
+		// (e.g. to build dropdowns on the login-gated screen), so this
+		// stays outside the auth group. It exposes no user data.
 		r.Get("/workflow", h.GetWorkflow)
 
-		// ── Projects ──────────────────────────────────────────────
-		r.Route("/projects", func(r chi.Router) {
-			r.Post("/", h.CreateProject)
-			r.Get("/", h.ListProjects)
-			r.Get("/{id}", h.GetProject)
-		})
+		// ── Protected group ───────────────────────────────────────────
+		// Everything inside requires a verified token. The auth
+		// middleware is applied to THIS group only, not globally, so the
+		// public endpoints above (and the static page / health checks)
+		// never require a token — a load balancer probing /ready has no
+		// token and must not need one.
+		//
+		// chi's r.Group creates a fresh middleware stack sharing the same
+		// routing tree; Use() here affects only routes registered inside
+		// this closure.
+		r.Group(func(r chi.Router) {
+			r.Use(d.Auth.Middleware)
 
-		// ── Tasks ─────────────────────────────────────────────────
-		r.Route("/tasks", func(r chi.Router) {
-			r.Post("/", h.CreateTask)
-			r.Get("/", h.ListTasks)
-			r.Get("/{id}", h.GetTask)
-			r.Delete("/{id}", h.DeleteTask)
+			// ── Projects ──────────────────────────────────────────
+			r.Route("/projects", func(r chi.Router) {
+				r.Post("/", h.CreateProject)
+				r.Get("/", h.ListProjects)
+				r.Get("/{id}", h.GetProject)
+			})
 
-			// Status is its own sub-resource, not part of a general
-			// task update, because it is the single mutation governed
-			// by the workflow transition rules. One guarded entry
-			// point for that rule.
-			r.Patch("/{id}/status", h.UpdateTaskStatus)
+			// ── Tasks ─────────────────────────────────────────────
+			r.Route("/tasks", func(r chi.Router) {
+				r.Post("/", h.CreateTask)
+				r.Get("/", h.ListTasks)
+				r.Get("/{id}", h.GetTask)
+				r.Delete("/{id}", h.DeleteTask)
+
+				// Status is its own sub-resource, not part of a general
+				// task update, because it is the single mutation governed
+				// by the workflow transition rules. One guarded entry
+				// point for that rule.
+				r.Patch("/{id}/status", h.UpdateTaskStatus)
+			})
 		})
 	})
 

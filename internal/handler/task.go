@@ -9,18 +9,44 @@ import (
 	"gotask/internal/apperror"
 	"gotask/internal/domain"
 	"gotask/internal/handler/dto"
+	"gotask/internal/middleware"
 	"gotask/internal/repository"
 	"gotask/pkg/response"
 )
 
-// stubReporterID is the placeholder "authenticated user" used until
-// Keycloak lands in Phase 6. Every created task/project is attributed to
-// this id. It matches the seed user the migration helper inserts so the
-// foreign keys resolve. The moment auth exists, this constant is replaced
-// by the user id from the verified token — and nothing else in these
-// handlers changes, because reporter/owner identity already flows in as
-// a parameter, never from the client.
-var stubReporterID = uuid.MustParse("00000000-0000-0000-0000-0000000000aa")
+// authedSubject returns the verified Keycloak subject as a uuid.UUID.
+//
+// This replaces Phase 5's stubReporterID. The seam deliberately left in
+// Phase 5 — reporter/owner identity flowing in as a PARAMETER, never as a
+// client-supplied wire field — is why this change is one helper and three
+// call-site edits, with zero change to request shapes or service code.
+//
+// It is only ever called from handlers behind the auth middleware, so a
+// verified subject is guaranteed present; an empty subject would mean the
+// middleware was misconfigured (a protected route mounted outside the
+// auth group), which is a programming error, surfaced as 401 rather than
+// silently attributing data to the nil user.
+//
+// Under Option A the subject IS the user identity end to end: it is what
+// the database stores in reporter_id/owner_id, with no local users table
+// to validate it against. Keycloak is the only thing that knows the
+// subject corresponds to a real user — and it already proved that by
+// signing the token we verified.
+func (h *Handler) authedSubject(r *http.Request) (uuid.UUID, error) {
+	sub := middleware.UserSubjectFromContext(r.Context())
+	if sub == "" {
+		return uuid.Nil, apperror.Unauthorized("no authenticated user on request")
+	}
+	id, err := uuid.Parse(sub)
+	if err != nil {
+		// Keycloak subjects are UUIDs by default. A non-UUID subject
+		// means the realm is configured with a different subject format
+		// than this app's schema (UUID columns) expects — a setup error,
+		// not a client error.
+		return uuid.Nil, apperror.Unauthorized("token subject is not a valid user id")
+	}
+	return id, nil
+}
 
 // CreateTask handles POST /api/v1/tasks.
 func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
@@ -34,9 +60,16 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Wire → service shape. The reporter is the (stubbed) authenticated
-	// user, supplied here, never taken from the request body.
-	created, err := h.taskSvc.Create(r.Context(), req.ToServiceInput(stubReporterID))
+	// The reporter is the VERIFIED authenticated user, read from the
+	// request context (put there by the auth middleware). It is supplied
+	// here as a parameter, never taken from the request body — a client
+	// cannot forge authorship.
+	reporter, err := h.authedSubject(r)
+	if err != nil {
+		h.respondError(w, r, err)
+		return
+	}
+	created, err := h.taskSvc.Create(r.Context(), req.ToServiceInput(reporter))
 	if err != nil {
 		h.respondError(w, r, err)
 		return
