@@ -309,6 +309,14 @@ visible decisions, not forgotten gaps:
 3. **Service↔repository error coupling** uses string matching
    (`mapRepoError`). A small typed error in the repository package
    would be cleaner. Deferred to Phase 9.
+4. **Option A: no local users table** (Phase 6 decision, permanent). The
+   `users` table was dropped; `reporter_id`/`owner_id` are bare Keycloak
+   subjects with no foreign key. Consequence, accepted deliberately:
+   `JOIN users` is impossible — any feature that must display a user's
+   name/email has to call the Keycloak Admin API, making Keycloak a
+   runtime dependency for *reads*, not just auth. This is not a gap to
+   fix; it is the chosen architecture, recorded so the trade-off stays
+   visible when Phase 7+ wants to show "reporter: Jane Doe".
 
 ### What the frontend gains
 
@@ -318,6 +326,77 @@ visible decisions, not forgotten gaps:
   `PATCH /tasks/{id}/status` and watch the workflow rule reject an
   illegal move with a 409, delete tasks. It only ever calls the real
   API — there are no debug endpoints left to call.
+
+## Phase 6 — Authentication: Keycloak, OIDC & PKCE
+
+The first phase where a mistake is a security hole, not a 500. Every
+`/api/v1/projects` and `/api/v1/tasks` route now requires a verified
+token; `stubReporterID` is gone.
+
+- **Keycloak** runs in Docker (same compose file as Postgres) as the
+  identity provider. The realm — client, PKCE settings, a `demo`/`demo`
+  user — is provisioned from a **committed `docker/realm-export.json`**,
+  imported on startup. Reproducible, zero manual clicking.
+- **Local token verification, not introspection.** The middleware does
+  OIDC discovery once at startup, then verifies each token's signature
+  locally against Keycloak's cached public keys (`coreos/go-oidc`
+  handles JWKS fetch + caching + key-rotation refresh). No Keycloak
+  round-trip per request. A token is trusted because the math proves
+  Keycloak signed it.
+- **The five checks**, none skippable: signature, issuer, **audience**
+  (the one people forget — stops a token for another client being
+  replayed here), expiry, not-before. `go-oidc`'s verifier enforces all
+  five; the code and comments make each explicit.
+- **PKCE** (Authorization Code + Proof Key for Code Exchange) in the
+  vanilla-JS SPA. No client secret (a secret in JS isn't one). The SPA
+  generates a `code_verifier`, sends only `SHA256(verifier)` to
+  Keycloak, and proves possession of the verifier at token exchange —
+  so an intercepted authorization code is useless to an attacker.
+- **Identity through context.** The verified `sub` rides in
+  `context.Context` exactly like `request_id` since Phase 1. The Phase 5
+  seam (reporter/owner as a parameter, never a wire field) paid off:
+  killing the stub was one helper + three call-site edits, zero changes
+  to request shapes or service code.
+- **401 vs 403 kept precise.** This middleware only ever emits **401**
+  ("I don't know who you are"). **403** ("I know you but you may not do
+  this") is an *authorization* decision — Phase 7. Conflating them is
+  the classic auth mistake; they stay separate phases.
+- **Public vs protected.** `/health`, `/ready`, `/api/v1/workflow`, and
+  the static page stay open (a load balancer probing `/ready` has no
+  token and must not need one). Projects and tasks are wrapped in an
+  auth-protected `chi` route group.
+- **Schema: Option A (you chose maximum purity).** Migration `000002`
+  drops the `users` table and the four foreign keys that referenced it;
+  `reporter_id`/`owner_id` become bare UUID = the Keycloak subject. See
+  backlog item 4 for the permanent consequence (no `JOIN users`).
+
+### New env vars
+
+```
+OIDC_ISSUER=http://localhost:8081/realms/gotask
+OIDC_CLIENT_ID=gotask-spa
+```
+
+### Bringing up auth
+
+```bash
+make deps-up       # starts Postgres AND Keycloak, waits for both healthy
+make migrate-up    # applies 000002 (drops users table)
+make run           # app does OIDC discovery at startup — Keycloak must be up
+```
+
+Keycloak's first start (realm import) takes ~30–60s; `make deps-up`
+waits for the realm's OIDC discovery document before returning, so when
+it finishes the app's startup discovery will succeed.
+
+### What the frontend gains (Phase 6)
+
+- A **Log in with Keycloak** button driving the full PKCE flow. After
+  login, the session card shows who you are; the task you create is
+  attributed to your real subject, not a stub. Token is held in memory
+  only (not localStorage — XSS-readable). An expired token → next call
+  401s → you're bounced back to login. Log out hits Keycloak's
+  end-session endpoint.
 
 ## Run it
 

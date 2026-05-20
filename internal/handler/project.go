@@ -23,9 +23,15 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// owner is the (stubbed) authenticated user — supplied here, never
-	// from the request body. Same seam as task reporter.
-	created, err := h.projectSvc.Create(r.Context(), req.ToServiceInput(stubReporterID))
+	// owner is the VERIFIED authenticated user, read from context — same
+	// seam as task reporter, supplied here as a parameter, never from the
+	// request body.
+	owner, err := h.authedSubject(r)
+	if err != nil {
+		h.respondError(w, r, err)
+		return
+	}
+	created, err := h.projectSvc.Create(r.Context(), req.ToServiceInput(owner))
 	if err != nil {
 		// Duplicate key surfaces as service.ErrConflict → 409 via
 		// respondError.

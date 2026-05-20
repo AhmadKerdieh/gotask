@@ -1,6 +1,6 @@
 # docker/docker-compose.yml
 #
-# Phase 3: a single `postgres` service. Phase 6 will add `keycloak`.
+# Phase 3: postgres. Phase 6 adds keycloak.
 #
 # Run from the repo root with:
 #   docker compose -f docker/docker-compose.yml up -d
@@ -39,6 +39,62 @@ services:
       interval: 3s
       timeout: 3s
       retries: 10
+
+  keycloak:
+    # Pinned, same reproducibility reasoning as postgres. Keycloak 24 is
+    # the Quarkus-based distribution; `start-dev` runs the dev profile
+    # (in-memory H2, HTTP allowed, no clustering) which is correct for
+    # local development and explicitly NOT for production.
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: gotask-keycloak
+    restart: unless-stopped
+    command:
+      - start-dev
+      - --import-realm
+    environment:
+      # Bootstrap admin for the Keycloak admin console (http://localhost:8081
+      # → "Administration Console"). This is the KEYCLOAK admin, unrelated
+      # to the gotask "demo" user inside the imported realm.
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      # start-dev defaults the HTTP port to 8080; the app already owns
+      # 8080 on the host, so map Keycloak to 8081 and tell Keycloak its
+      # own port so issuer URLs it mints match what the app expects
+      # (http://localhost:8081/realms/gotask).
+      KC_HTTP_PORT: 8081
+      KC_HOSTNAME_URL: http://localhost:8081
+      KC_HOSTNAME_ADMIN_URL: http://localhost:8081
+    ports:
+      - "8081:8081"
+    volumes:
+      # --import-realm reads every *.json in /opt/keycloak/data/import on
+      # startup. Mounting our committed realm there makes the realm,
+      # client, PKCE settings, and demo user reproducible with zero manual
+      # clicking — re-importing an already-present realm is a no-op, so
+      # restarts are safe.
+      - ./realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    healthcheck:
+      # The healthcheck speaks HTTP/1.1 and includes a Host header,
+      # because Keycloak in start-dev mode constructs its own URLs from
+      # the incoming request's authority. A request with no Host (e.g.
+      # HTTP/1.0) makes Keycloak's discovery handler throw an NPE rather
+      # than return the document, so the healthcheck must look like a
+      # real client.
+      #
+      # printf (not echo -e) so the CR/LF line terminators are interpreted
+      # portably across minimal /bin/sh implementations. Connection: close
+      # is required: without it the server holds the socket open and the
+      # `grep < &3` blocks until the timeout fires every time.
+      test:
+        - "CMD-SHELL"
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/8081
+          && printf 'GET /realms/gotask/.well-known/openid-configuration HTTP/1.1\r\nHost: localhost:8081\r\nConnection: close\r\n\r\n' >&3
+          && grep -q jwks_uri <&3
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 60s
 
 volumes:
   gotask_pgdata:

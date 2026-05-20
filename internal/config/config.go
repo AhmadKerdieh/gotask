@@ -55,6 +55,25 @@ type Config struct {
 	// claim a known, bounded slice of it.
 	DBMaxConns int `mapstructure:"DB_MAX_CONNS"`
 	DBMinConns int `mapstructure:"DB_MIN_CONNS"`
+
+	// ── OIDC / Keycloak (Phase 6) ──────────────────────────────────────
+	//
+	// OIDCIssuer is the realm's issuer URL, e.g.
+	//   http://localhost:8081/realms/gotask
+	// The middleware performs OIDC discovery against
+	// <issuer>/.well-known/openid-configuration to find the JWKS endpoint;
+	// it never hardcodes key URLs.
+	//
+	// OIDCClientID is this application's client as registered in the
+	// realm. Every token's "aud" (audience) claim MUST include this value
+	// — that check is what stops a token minted for a different app in
+	// the same realm being replayed against us.
+	//
+	// There is no client SECRET here on purpose: the only OAuth client is
+	// the browser SPA, which is a PUBLIC client using PKCE. A secret in
+	// JavaScript is not a secret; PKCE is the correct substitute.
+	OIDCIssuer   string `mapstructure:"OIDC_ISSUER"`
+	OIDCClientID string `mapstructure:"OIDC_CLIENT_ID"`
 }
 
 // Load reads the .env file (if present) and overlays environment variables,
@@ -74,6 +93,8 @@ func Load() (*Config, error) {
 	v.SetDefault("WORKFLOW_PATH", "./workflow.yaml")
 	v.SetDefault("DB_MAX_CONNS", 10)
 	v.SetDefault("DB_MIN_CONNS", 2)
+	v.SetDefault("OIDC_ISSUER", "http://localhost:8081/realms/gotask")
+	v.SetDefault("OIDC_CLIENT_ID", "gotask-spa")
 
 	// .env file lookup.
 	v.SetConfigName(".env")
@@ -151,6 +172,12 @@ func (c *Config) validate() error {
 	}
 	if c.DBMinConns < 0 || c.DBMinConns > c.DBMaxConns {
 		return fmt.Errorf("config: DB_MIN_CONNS must be between 0 and DB_MAX_CONNS (%d), got %d", c.DBMaxConns, c.DBMinConns)
+	}
+	if c.OIDCIssuer == "" {
+		return fmt.Errorf("config: OIDC_ISSUER is required (the Keycloak realm issuer URL)")
+	}
+	if c.OIDCClientID == "" {
+		return fmt.Errorf("config: OIDC_CLIENT_ID is required (this app's client in the realm)")
 	}
 	return nil
 }

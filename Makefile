@@ -1,5 +1,6 @@
 .PHONY: help run build test test-race fmt vet tidy clean \
 	db-up db-down db-logs db-psql \
+	kc-up kc-down kc-logs deps-up deps-down \
 	migrate-up migrate-down migrate-create migrate-version migrate-force
 
 # Default target — `make` with no args prints help.
@@ -41,21 +42,48 @@ clean: ## Remove build artifacts
 	rm -rf bin coverage.html coverage.txt
 
 # ── Database (docker) ────────────────────────────────────────────────────
-db-up: ## Start Postgres and wait until it is accepting connections
-	$(COMPOSE) up -d
+db-up: ## Start Postgres only and wait until it is accepting connections
+	$(COMPOSE) up -d postgres
 	@echo "waiting for postgres to be healthy..."
 	@until [ "$$($(COMPOSE) ps -q postgres | xargs docker inspect -f '{{.State.Health.Status}}' 2>/dev/null)" = "healthy" ]; do \
 		sleep 1; printf "."; \
 	done; echo " ready."
 
-db-down: ## Stop Postgres (data is preserved in the named volume)
-	$(COMPOSE) down
+db-down: ## Stop Postgres only (data preserved in the named volume)
+	$(COMPOSE) stop postgres
 
 db-logs: ## Tail Postgres logs
 	$(COMPOSE) logs -f postgres
 
 db-psql: ## Open a psql shell into the running database
 	docker exec -it gotask-postgres psql "$(DATABASE_URL)"
+
+# ── Keycloak (docker) ────────────────────────────────────────────────────
+kc-up: ## Start Keycloak and wait until the realm's OIDC discovery is live
+	$(COMPOSE) up -d keycloak
+	@echo "waiting for keycloak realm to be importable & discoverable..."
+	@until [ "$$($(COMPOSE) ps -q keycloak | xargs docker inspect -f '{{.State.Health.Status}}' 2>/dev/null)" = "healthy" ]; do \
+		sleep 2; printf "."; \
+	done; echo " ready."
+
+kc-down: ## Stop Keycloak only
+	$(COMPOSE) stop keycloak
+
+kc-logs: ## Tail Keycloak logs
+	$(COMPOSE) logs -f keycloak
+
+# ── All dependencies together ────────────────────────────────────────────
+deps-up: ## Start Postgres + Keycloak and wait until BOTH are healthy
+	$(COMPOSE) up -d
+	@echo "waiting for postgres..."
+	@i=0; until [ "$$($(COMPOSE) ps -q postgres | xargs docker inspect -f '{{.State.Health.Status}}' 2>/dev/null)" = "healthy" ] || [ $$i -ge 60 ]; do sleep 1; i=$$((i+1)); printf "."; done; \
+		[ $$i -lt 60 ] && echo " pg ready." || (echo " FAILED — postgres not healthy in 60s. Run: $(COMPOSE) logs postgres"; exit 1)
+	@echo "waiting for keycloak (realm import + discovery, ~30-60s on first run)..."
+	@i=0; until [ "$$($(COMPOSE) ps -q keycloak | xargs docker inspect -f '{{.State.Health.Status}}' 2>/dev/null)" = "healthy" ] || [ $$i -ge 120 ]; do sleep 2; i=$$((i+1)); printf "."; done; \
+		[ $$i -lt 120 ] && echo " kc ready." || (echo " FAILED — keycloak not healthy in 240s. Run: $(COMPOSE) logs keycloak"; exit 1)
+
+deps-down: ## Stop Postgres + Keycloak (Postgres data preserved). Use `$(COMPOSE) down -v` to wipe.
+	$(COMPOSE) down
 
 # ── Migrations ───────────────────────────────────────────────────────────
 # Migrations are an EXPLICIT operational step, never run automatically by

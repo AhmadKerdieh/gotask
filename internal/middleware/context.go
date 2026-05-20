@@ -29,6 +29,8 @@ type ctxKey int
 const (
 	requestIDKey ctxKey = iota
 	loggerKey
+	userSubjectKey
+	userClaimsKey
 )
 
 // WithRequestID returns a derived context carrying the request ID.
@@ -62,4 +64,45 @@ func LoggerFromContext(ctx context.Context) *slog.Logger {
 		return v
 	}
 	return nil
+}
+
+// UserClaims is the typed view of the verified token's payload that the
+// rest of the application is allowed to depend on. It is deliberately
+// minimal: only what handlers actually need. Roles join in Phase 7.
+//
+// Subject is the Keycloak "sub" claim — the stable, unique user id. Under
+// Option A this is the ONLY user identifier the application has; it is
+// what goes into tasks.reporter_id / projects.owner_id. Email and Name
+// are convenience copies from the token for logging/UX; they are NOT
+// authoritative (Keycloak is) and must never be used for an authorization
+// decision.
+type UserClaims struct {
+	Subject string
+	Email   string
+	Name    string
+}
+
+// WithUser returns a derived context carrying the verified user identity.
+// Set ONLY by the auth middleware after full token verification — never
+// from anything a client controls directly.
+func WithUser(ctx context.Context, c UserClaims) context.Context {
+	ctx = context.WithValue(ctx, userSubjectKey, c.Subject)
+	return context.WithValue(ctx, userClaimsKey, c)
+}
+
+// UserSubjectFromContext returns the verified Keycloak subject, or "" if
+// the request was not authenticated. Handlers behind the auth middleware
+// can rely on this being non-empty; public handlers must not assume it.
+func UserSubjectFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(userSubjectKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// UserClaimsFromContext returns the full verified claims and whether they
+// were present.
+func UserClaimsFromContext(ctx context.Context) (UserClaims, bool) {
+	v, ok := ctx.Value(userClaimsKey).(UserClaims)
+	return v, ok
 }
