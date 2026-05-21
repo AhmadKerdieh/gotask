@@ -18,6 +18,8 @@ package middleware
 import (
 	"context"
 	"log/slog"
+
+	"gotask/internal/authz"
 )
 
 // ctxKey is a private type used to namespace context keys. The Go community
@@ -66,21 +68,15 @@ func LoggerFromContext(ctx context.Context) *slog.Logger {
 	return nil
 }
 
-// UserClaims is the typed view of the verified token's payload that the
-// rest of the application is allowed to depend on. It is deliberately
-// minimal: only what handlers actually need. Roles join in Phase 7.
-//
-// Subject is the Keycloak "sub" claim — the stable, unique user id. Under
-// Option A this is the ONLY user identifier the application has; it is
-// what goes into tasks.reporter_id / projects.owner_id. Email and Name
-// are convenience copies from the token for logging/UX; they are NOT
-// authoritative (Keycloak is) and must never be used for an authorization
-// decision.
-type UserClaims struct {
-	Subject string
-	Email   string
-	Name    string
-}
+// UserClaims is an alias for authz.Claims, retained at this name so the
+// middleware's API doesn't change for existing callers. The TYPE itself
+// lives in the authz package because that's where the type's
+// reason-to-exist (authorization decisions) lives — and so the service
+// can depend on Claims without transitively importing this package's
+// net/http dependencies. This is a real architectural seam: the auth
+// layer produces a value the authz layer consumes; middleware doesn't
+// own the schema.
+type UserClaims = authz.Claims
 
 // WithUser returns a derived context carrying the verified user identity.
 // Set ONLY by the auth middleware after full token verification — never

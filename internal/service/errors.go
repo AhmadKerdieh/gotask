@@ -38,6 +38,15 @@ var (
 	// ErrConflict is returned for state collisions that are not
 	// transitions — e.g. a duplicate project key. Handler maps it to 409.
 	ErrConflict = errors.New("conflict")
+
+	// ErrForbidden is returned when the caller is authenticated but the
+	// requested operation is not permitted by the authorization rules
+	// (e.g. deleting someone else's task without the manager role).
+	// Handler maps it to 403. Distinct from ErrNotFound by design: we
+	// surface forbidden rather than masking it as "not found" because
+	// the caller IS authenticated and the resource DOES exist — telling
+	// them so is honest and matches every other API.
+	ErrForbidden = errors.New("forbidden")
 )
 
 // ValidationError reports one or more invalid input fields. It is a

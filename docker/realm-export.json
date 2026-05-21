@@ -40,6 +40,21 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "gotask-backend",
+      "name": "gotask backend (confidential, service account)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "gotask-backend-secret",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "attributes": {
+        "use.refresh.tokens": "false"
+      }
     }
   ],
   "users": [
@@ -56,7 +71,38 @@
           "value": "demo",
           "temporary": false
         }
+      ],
+      "realmRoles": [
+        "member",
+        "manager",
+        "admin"
       ]
     }
-  ]
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "member",
+        "description": "default role; create/own tasks"
+      },
+      {
+        "name": "manager",
+        "description": "can act on others' tasks"
+      },
+      {
+        "name": "admin",
+        "description": "can list everyone's audit log"
+      }
+    ]
+  },
+  "clientScopeMappings": {
+    "realm-management": [
+      {
+        "client": "gotask-backend",
+        "roles": [
+          "view-users"
+        ]
+      }
+    ]
+  }
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"gotask/internal/audit"
 	"gotask/internal/domain"
 )
 
@@ -64,6 +65,19 @@ func (s *ProjectService) Create(ctx context.Context, in CreateProjectInput) (dom
 		// the handler maps it to 409 without knowing about pg codes.
 		return domain.Project{}, mapRepoError(err)
 	}
+
+	// Audit after success. Actor and owner are the same here (the
+	// authenticated user owns what they create).
+	if s.auditor != nil {
+		_ = s.auditor.Record(ctx, audit.Event{
+			Actor:   in.OwnerID,
+			Action:  audit.ActionProjectCreated,
+			Target:  audit.Target{Kind: "project", ID: created.ID},
+			Outcome: audit.OutcomeSuccess,
+			Detail:  map[string]any{"key": created.Key, "name": created.Name},
+		})
+	}
+
 	return created, nil
 }
 

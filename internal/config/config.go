@@ -74,6 +74,23 @@ type Config struct {
 	// JavaScript is not a secret; PKCE is the correct substitute.
 	OIDCIssuer   string `mapstructure:"OIDC_ISSUER"`
 	OIDCClientID string `mapstructure:"OIDC_CLIENT_ID"`
+
+	// ── Keycloak Admin API (Phase 7, Option A consequence) ────────────
+	//
+	// These configure the server-to-server lookup used to enrich audit
+	// responses with real names/emails. They are OPTIONAL: if either
+	// client id or secret is unset, the app falls back to a noop lookup
+	// and audit responses show subjects only. This bounds the runtime
+	// dependency on Keycloak to "audit response enrichment", not the
+	// whole app.
+	//
+	// KeycloakAdminBaseURL is the Keycloak host (no realm path), e.g.
+	// http://localhost:8081. The Admin API lives at /admin/realms/...
+	// which is a different path tree from the OIDC discovery URL.
+	KeycloakAdminBaseURL      string `mapstructure:"KEYCLOAK_ADMIN_BASE_URL"`
+	KeycloakRealm             string `mapstructure:"KEYCLOAK_REALM"`
+	KeycloakAdminClientID     string `mapstructure:"KEYCLOAK_ADMIN_CLIENT_ID"`
+	KeycloakAdminClientSecret string `mapstructure:"KEYCLOAK_ADMIN_CLIENT_SECRET"`
 }
 
 // Load reads the .env file (if present) and overlays environment variables,
@@ -95,6 +112,8 @@ func Load() (*Config, error) {
 	v.SetDefault("DB_MIN_CONNS", 2)
 	v.SetDefault("OIDC_ISSUER", "http://localhost:8081/realms/gotask")
 	v.SetDefault("OIDC_CLIENT_ID", "gotask-spa")
+	v.SetDefault("KEYCLOAK_ADMIN_BASE_URL", "http://localhost:8081")
+	v.SetDefault("KEYCLOAK_REALM", "gotask")
 
 	// .env file lookup.
 	v.SetConfigName(".env")

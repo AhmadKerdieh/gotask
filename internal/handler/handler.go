@@ -21,9 +21,11 @@ import (
 	"net/http"
 
 	"gotask/internal/apperror"
+	"gotask/internal/audit"
 	"gotask/internal/config"
-	"gotask/internal/middleware"
 	"gotask/internal/database"
+	"gotask/internal/keycloakadmin"
+	"gotask/internal/middleware"
 	"gotask/internal/service"
 	"gotask/internal/validator"
 	"gotask/pkg/response"
@@ -45,6 +47,15 @@ type Handler struct {
 
 	taskSvc    *service.TaskService
 	projectSvc *service.ProjectService
+
+	// auditor is the Reader half — handlers consume audit history via
+	// the same interface the service writes through. Writes happen in
+	// the service; reads happen here (admin/audit endpoint).
+	auditor audit.Reader
+
+	// userLookup resolves Keycloak subs to display names/emails for
+	// audit responses. May be a NoopLookup; the handler tolerates that.
+	userLookup keycloakadmin.Lookup
 }
 
 // Deps is the constructor input for Handler. Using a struct (rather than
@@ -61,6 +72,9 @@ type Deps struct {
 
 	TaskSvc    *service.TaskService
 	ProjectSvc *service.ProjectService
+
+	Auditor    audit.Reader
+	UserLookup keycloakadmin.Lookup
 }
 
 // New constructs a Handler from the given dependencies.
@@ -73,6 +87,8 @@ func New(d Deps) *Handler {
 		db:         d.DB,
 		taskSvc:    d.TaskSvc,
 		projectSvc: d.ProjectSvc,
+		auditor:    d.Auditor,
+		userLookup: d.UserLookup,
 	}
 }
 
@@ -121,6 +137,10 @@ func (h *Handler) respondError(w http.ResponseWriter, r *http.Request, err error
 		return
 	case errors.Is(err, service.ErrConflict):
 		response.Error(w, http.StatusConflict, "conflict", "the request conflicts with current state")
+		return
+	case errors.Is(err, service.ErrForbidden):
+		response.Error(w, http.StatusForbidden, "forbidden",
+			"the authenticated user does not have permission for this action")
 		return
 	}
 

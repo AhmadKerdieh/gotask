@@ -9,9 +9,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"gotask/internal/authz"
 	"gotask/internal/config"
 	"gotask/internal/domain"
 )
+
+// managerClaims returns a Claims value that authorizes ownership-gated
+// operations across every seeded task in this test file. Phase 7 added
+// authorization to the service (the reporter or a manager may
+// delete/change-status); pre-Phase-7 tests didn't supply claims at all,
+// so the simplest non-invasive fix is to call as a manager — which
+// satisfies CanDeleteTask / CanChangeTaskStatus regardless of reporter.
+// Tests that specifically exercise the OWNER path and the FORBIDDEN path
+// are added in authz_test.go and the new ownership tests below.
+func managerClaims() authz.Claims {
+	return authz.Claims{
+		Subject: uuid.New().String(),
+		Roles:   []string{authz.RoleManager},
+	}
+}
 
 // testWorkflow builds the workflow used across these tests. It mirrors
 // the real workflow.yaml shape closely enough to exercise every business
@@ -189,7 +205,7 @@ func TestTaskService_UpdateStatus_TransitionRules(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			_, err = svc.UpdateStatus(context.Background(), seeded.ID, tc.to)
+			_, err = svc.UpdateStatus(context.Background(), managerClaims(), seeded.ID, tc.to)
 
 			switch {
 			case tc.wantErr != nil:
@@ -234,10 +250,10 @@ func TestTaskService_Delete_RoundTrips(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, svc.Delete(context.Background(), created.ID))
+	require.NoError(t, svc.Delete(context.Background(), managerClaims(), created.ID))
 
 	// Deleting again must now be ErrNotFound — proves the delete
 	// actually removed it, not just returned nil.
-	err = svc.Delete(context.Background(), created.ID)
+	err = svc.Delete(context.Background(), managerClaims(), created.ID)
 	assert.True(t, errors.Is(err, ErrNotFound))
 }

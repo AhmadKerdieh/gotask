@@ -6,6 +6,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"gotask/internal/audit"
+	"gotask/internal/authz"
 	"gotask/internal/domain"
 	"gotask/internal/repository"
 )
@@ -102,7 +104,39 @@ func (s *TaskService) Create(ctx context.Context, in CreateTaskInput) (domain.Ta
 	if err != nil {
 		return domain.Task{}, mapRepoError(err)
 	}
+
+	// 6. Audit. Recorded AFTER the operation succeeds, never before —
+	//    auditing a write that subsequently fails would leave the
+	//    history claiming an event that didn't happen. The audit call
+	//    failing does not fail the operation: see the helper.
+	s.audit(ctx, audit.Event{
+		Actor:   in.ReporterID,
+		Action:  audit.ActionTaskCreated,
+		Target:  audit.Target{Kind: "task", ID: created.ID},
+		Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{
+			"project_id": created.ProjectID.String(),
+			"title":      created.Title,
+			"status":     string(created.Status),
+		},
+	})
+
 	return created, nil
+}
+
+// audit emits an event through the configured auditor. A nil auditor
+// (early-startup test scenarios) is a no-op rather than a panic. A
+// Record error is logged via the audit recorder's own concerns; we do
+// NOT let an audit-write failure fail the business operation, because
+// the operation has already succeeded — declaring it failed because we
+// couldn't log it would be a worse outcome than a brief gap in audit.
+// Persistent audit failure is an operational alarm condition; the
+// service is not the layer that surfaces that.
+func (s *TaskService) audit(ctx context.Context, e audit.Event) {
+	if s.auditor == nil {
+		return
+	}
+	_ = s.auditor.Record(ctx, e)
 }
 
 // Get returns a single task or ErrNotFound.
@@ -136,10 +170,28 @@ func (s *TaskService) List(ctx context.Context, f repository.TaskFilter) ([]doma
 //     (this also rejects moves out of terminal statuses and no-op
 //      self-transitions, by the workflow's own rules)
 //  4. only then write
-func (s *TaskService) UpdateStatus(ctx context.Context, id uuid.UUID, to domain.Status) (domain.Task, error) {
+func (s *TaskService) UpdateStatus(ctx context.Context, claims authz.Claims, id uuid.UUID, to domain.Status) (domain.Task, error) {
 	current, err := s.tasks.GetByID(ctx, id)
 	if err != nil {
 		return domain.Task{}, mapRepoError(err)
+	}
+
+	// Authorization is fine-grained (depends on the loaded resource), so
+	// it lives here, not in middleware. Audit the denial too — knowing
+	// someone TRIED to change a task they shouldn't is exactly what
+	// security review wants.
+	if !authz.CanChangeTaskStatus(claims, current) {
+		s.audit(ctx, audit.Event{
+			Actor:   authz.Subject(claims),
+			Action:  audit.ActionTaskStatusChanged,
+			Target:  audit.Target{Kind: "task", ID: id},
+			Outcome: audit.OutcomeDenied,
+			Detail: map[string]any{
+				"reason": "not owner and not manager",
+				"to":     string(to),
+			},
+		})
+		return domain.Task{}, ErrForbidden
 	}
 
 	if !s.workflow.IsStatus(string(to)) {
@@ -161,14 +213,51 @@ func (s *TaskService) UpdateStatus(ctx context.Context, id uuid.UUID, to domain.
 	if err != nil {
 		return domain.Task{}, mapRepoError(err)
 	}
+
+	s.audit(ctx, audit.Event{
+		Actor:   authz.Subject(claims),
+		Action:  audit.ActionTaskStatusChanged,
+		Target:  audit.Target{Kind: "task", ID: id},
+		Outcome: audit.OutcomeSuccess,
+		Detail:  map[string]any{"from": from, "to": string(to)},
+	})
+
 	return updated, nil
 }
 
-// Delete removes a task or returns ErrNotFound.
-func (s *TaskService) Delete(ctx context.Context, id uuid.UUID) error {
+// Delete removes a task or returns ErrNotFound. Authorization: only the
+// task's reporter or a manager may delete. Denied attempts are audited.
+func (s *TaskService) Delete(ctx context.Context, claims authz.Claims, id uuid.UUID) error {
+	current, err := s.tasks.GetByID(ctx, id)
+	if err != nil {
+		return mapRepoError(err)
+	}
+
+	if !authz.CanDeleteTask(claims, current) {
+		s.audit(ctx, audit.Event{
+			Actor:   authz.Subject(claims),
+			Action:  audit.ActionTaskDeleted,
+			Target:  audit.Target{Kind: "task", ID: id},
+			Outcome: audit.OutcomeDenied,
+			Detail:  map[string]any{"reason": "not owner and not manager"},
+		})
+		return ErrForbidden
+	}
+
 	if err := s.tasks.Delete(ctx, id); err != nil {
 		return mapRepoError(err)
 	}
+
+	s.audit(ctx, audit.Event{
+		Actor:   authz.Subject(claims),
+		Action:  audit.ActionTaskDeleted,
+		Target:  audit.Target{Kind: "task", ID: id},
+		Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{
+			"project_id": current.ProjectID.String(),
+			"title":      current.Title,
+		},
+	})
 	return nil
 }
 

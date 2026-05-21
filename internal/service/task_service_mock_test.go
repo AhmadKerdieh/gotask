@@ -46,7 +46,7 @@ func TestTaskService_UpdateStatus_IllegalTransition_DoesNotWrite(t *testing.T) {
 		Workflow: testWorkflow(t),
 	})
 
-	_, err := svc.UpdateStatus(context.Background(), id, domain.Status("in_progress"))
+	_, err := svc.UpdateStatus(context.Background(), managerClaims(), id, domain.Status("in_progress"))
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidTransition)

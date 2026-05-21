@@ -10,9 +10,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"gotask/internal/audit"
 	"gotask/internal/config"
 	"gotask/internal/database"
 	"gotask/internal/handler"
+	"gotask/internal/keycloakadmin"
 	"gotask/internal/middleware"
 	"gotask/internal/service"
 	"gotask/internal/validator"
@@ -42,6 +44,10 @@ type Deps struct {
 	// mounted OUTSIDE that group so a load balancer probing /ready never
 	// needs a token.
 	Auth *middleware.Authenticator
+
+	// Auditor (read side) and UserLookup feed the /audit endpoint.
+	Auditor    audit.Reader
+	UserLookup keycloakadmin.Lookup
 }
 
 // NewRouter assembles the middleware chain and the route table and returns
@@ -100,6 +106,8 @@ func NewRouter(d Deps) http.Handler {
 		DB:         d.DB,
 		TaskSvc:    d.TaskSvc,
 		ProjectSvc: d.ProjectSvc,
+		Auditor:    d.Auditor,
+		UserLookup: d.UserLookup,
 	})
 
 	// ── API routes ────────────────────────────────────────────────────
@@ -154,6 +162,16 @@ func NewRouter(d Deps) http.Handler {
 				// point for that rule.
 				r.Patch("/{id}/status", h.UpdateTaskStatus)
 			})
+
+			// Audit. Authentication is sufficient to LIST your own
+			// history; cross-user listing is gated INSIDE the handler
+			// by authz.CanListAuditAcrossUsers. We deliberately do NOT
+			// wrap this in RequireRole("admin") at the route level —
+			// the endpoint is meaningfully usable by every
+			// authenticated user, just narrowed for non-admins. That
+			// is fine-grained, so it belongs in the handler/service
+			// layer, not in middleware.
+			r.Get("/audit", h.ListAudit)
 		})
 	})
 

@@ -65,7 +65,7 @@
   <div class="shell">
     <header>
       <div class="brand">gotask<span class="dot">.</span></div>
-      <div class="meta">phase <b>06</b> · auth (oidc + pkce)</div>
+      <div class="meta">phase <b>07</b> · authz · roles · audit</div>
     </header>
 
     <p class="tagline">A minimal task tracker, <em>now behind real auth</em>.</p>
@@ -145,9 +145,24 @@
       </table>
     </div>
 
+    <!-- Audit -->
+    <div class="card">
+      <div class="card-head"><span class="label">audit log</span>
+        <div class="row">
+          <span id="audit-scope" style="font-size:11px;color:var(--ink-3)"></span>
+          <input class="in" id="f-actor" placeholder="filter by actor (admin only)" style="min-width:240px;display:none">
+          <button class="btn tiny" id="reload-audit">reload</button>
+        </div>
+      </div>
+      <table class="tbl">
+        <thead><tr><th style="width:170px">when</th><th>actor</th><th>action</th><th>target</th><th style="width:90px">outcome</th></tr></thead>
+        <tbody id="a-body"><tr><td colspan="5" class="empty">log in to see audit history</td></tr></tbody>
+      </table>
+    </div>
+
     <footer>
-      <span>gotask · go 1.22+ · chi v5 · pgx v5 · oidc · phase 06</span>
-      <span>keycloak + pkce</span>
+      <span>gotask · go 1.22+ · chi v5 · pgx v5 · oidc + authz · phase 07</span>
+      <span>roles · audit · keycloak admin</span>
     </footer>
   </div>
 
@@ -264,8 +279,10 @@
       const pill=$("auth"),who=$("who");
       if(ACCESS_TOKEN&&ID_CLAIMS){
         pill.className="pill ok";pill.textContent="signed in";
+        const rs = roles();
+        const rolesStr = rs.length ? "  ·  roles " + rs.join(", ") : "  ·  no realm roles";
         who.textContent=(ID_CLAIMS.name||ID_CLAIMS.preferred_username||"user")+
-          "  ·  sub "+(ID_CLAIMS.sub||"").slice(0,8)+"…";
+          "  ·  sub "+(ID_CLAIMS.sub||"").slice(0,8)+"…"+rolesStr;
         $("login-btn").style.display="none";
         $("logout-btn").style.display="";
       }else{
@@ -343,15 +360,79 @@
       if(r.status===200&&r.data&&r.data.success){
         const ts=r.data.data;
         if(!ts.length){tb.innerHTML='<tr><td colspan="5" class="empty">no tasks yet</td></tr>';return;}
-        tb.innerHTML=ts.map(t=>`<tr>
-          <td><b style="color:var(--ink)">${t.title}</b><div style="font-size:11px;color:var(--ink-3)">${t.id}</div></td>
-          <td>${statusCell(t.status)}</td>
-          <td>${t.priority}</td>
-          <td>${transitionControls(t)}</td>
-          <td><button class="btn tiny tg-del" data-id="${t.id}">delete</button></td>
-        </tr>`).join("");
+        tb.innerHTML=ts.map(t=>{
+          // Role-aware row: only render actions the user can actually
+          // perform. The SERVER is the source of truth (it returns 403
+          // either way); this is UX. Mirror the authz.CanX rules from
+          // the Go side: owner OR manager may delete / change status.
+          const mine = ID_CLAIMS && t.reporter_id === ID_CLAIMS.sub;
+          const canAct = mine || isManager() || isAdmin();
+          const statusUI = canAct ? transitionControls(t)
+                                  : `<span class="st ${t.status}">${t.status}</span>`;
+          const delUI = canAct
+            ? `<button class="btn tiny tg-del" data-id="${t.id}">delete</button>`
+            : "";
+          return `<tr>
+            <td><b style="color:var(--ink)">${t.title}</b><div style="font-size:11px;color:var(--ink-3)">${t.id}</div></td>
+            <td>${statusCell(t.status)}</td>
+            <td>${t.priority}</td>
+            <td>${statusUI}</td>
+            <td>${delUI}</td>
+          </tr>`;
+        }).join("");
         bindTaskRowActions();
       }
+    }
+
+    // Role helpers — read from the verified claims (realm_access.roles).
+    // The token is the source of truth: roles arrived signed by Keycloak.
+    function roles(){
+      return (ID_CLAIMS && ID_CLAIMS.realm_access && ID_CLAIMS.realm_access.roles) || [];
+    }
+    function hasRole(r){ return roles().includes(r); }
+    function isManager(){ return hasRole("manager") || hasRole("admin"); }
+    function isAdmin(){ return hasRole("admin"); }
+
+    // ── Audit ───────────────────────────────────────────────────────
+    function fmtTime(s){
+      try{return new Date(s).toLocaleTimeString();}catch{return s;}
+    }
+    function actorCell(e){
+      // ActorName/ActorEmail are populated by the server via the
+      // Keycloak Admin API lookup. Missing = "lookup unavailable".
+      const name = e.actor_name || "";
+      const sub  = (e.actor_subject || "").slice(0,8);
+      return name
+        ? `${name}<div style="font-size:11px;color:var(--ink-3)">${sub}…</div>`
+        : `<span style="color:var(--ink-2)">${sub}…</span><div style="font-size:11px;color:var(--ink-3)">no name</div>`;
+    }
+    function outcomeCell(o){
+      const cls = o==="success" ? "ok" : "err";
+      return `<span class="pill ${cls}" style="padding:1px 8px;font-size:11px">${o}</span>`;
+    }
+    async function loadAudit(){
+      if(!ACCESS_TOKEN){
+        $("a-body").innerHTML='<tr><td colspan="5" class="empty">log in to see audit history</td></tr>';
+        return;
+      }
+      $("audit-scope").textContent = isAdmin() ? "admin view (everyone)" : "your actions only";
+      $("f-actor").style.display = isAdmin() ? "" : "none";
+      const actor=$("f-actor").value.trim();
+      const qs = actor ? `?actor=${encodeURIComponent(actor)}` : "";
+      const r = await api("GET","/audit"+qs);
+      const tb=$("a-body");
+      if(r.status!==200||!r.data||!r.data.success){
+        tb.innerHTML='<tr><td colspan="5" class="empty">audit unavailable</td></tr>';return;
+      }
+      const es=r.data.data;
+      if(!es.length){tb.innerHTML='<tr><td colspan="5" class="empty">no audit entries yet</td></tr>';return;}
+      tb.innerHTML = es.map(e=>`<tr>
+        <td>${fmtTime(e.occurred_at)}</td>
+        <td>${actorCell(e)}</td>
+        <td><code style="font-size:11.5px">${e.action}</code></td>
+        <td><span style="color:var(--ink-3)">${e.target_kind}</span> ${e.target_id.slice(0,8)}…</td>
+        <td>${outcomeCell(e.outcome)}</td>
+      </tr>`).join("");
     }
 
     function bindTaskRowActions(){
@@ -361,7 +442,7 @@
         b.disabled=true;
         const r=await api("PATCH",`/tasks/${id}/status`,{status:sel.value});
         b.disabled=false;
-        if(r.status===200){toast($("t-toast"),"status updated",true);loadTasks();}
+        if(r.status===200){toast($("t-toast"),"status updated",true);loadTasks();loadAudit();}
         else if(r.status===409){toast($("t-toast"),"rejected: "+(r.data?.error?.message||"illegal transition"),false);}
         else if(r.status===422){toast($("t-toast"),"unknown status",false);}
         else{toast($("t-toast"),"error "+r.status,false);}
@@ -370,7 +451,7 @@
         const id=b.dataset.id;b.disabled=true;
         const r=await api("DELETE",`/tasks/${id}`);
         b.disabled=false;
-        if(r.status===204){toast($("t-toast"),"task deleted",true);loadTasks();}
+        if(r.status===204){toast($("t-toast"),"task deleted",true);loadTasks();loadAudit();}
         else{toast($("t-toast"),"delete failed ("+r.status+")",false);}
       });
     }
@@ -379,7 +460,7 @@
       const key=$("p-key").value.trim(),name=$("p-name").value.trim();
       if(!key||!name){toast($("p-toast"),"key and name are required",false);return;}
       const r=await api("POST","/projects",{key,name,description:""});
-      if(r.status===201){toast($("p-toast"),"project created",true);$("p-key").value="";$("p-name").value="";loadProjects();}
+      if(r.status===201){toast($("p-toast"),"project created",true);$("p-key").value="";$("p-name").value="";loadProjects();loadAudit();}
       else if(r.status===409){toast($("p-toast"),"a project with that key already exists",false);}
       else if(r.status===422){toast($("p-toast"),"validation: "+JSON.stringify(r.data?.error?.fields||{}),false);}
       else{toast($("p-toast"),"error "+r.status,false);}
@@ -392,7 +473,7 @@
       const body={project_id,title,description:""};
       const pr=$("t-priority").value;if(pr)body.priority=pr;
       const r=await api("POST","/tasks",body);
-      if(r.status===201){toast($("t-toast"),"task created (status: "+r.data.data.status+")",true);$("t-title").value="";loadTasks();}
+      if(r.status===201){toast($("t-toast"),"task created (status: "+r.data.data.status+")",true);$("t-title").value="";loadTasks();loadAudit();}
       else if(r.status===422){toast($("t-toast"),"validation: "+JSON.stringify(r.data?.error?.fields||{}),false);}
       else{toast($("t-toast"),"error "+r.status,false);}
     };
@@ -400,6 +481,7 @@
     $("reload-proj").onclick=loadProjects;
     $("reload-tasks").onclick=loadTasks;
     $("f-status").onchange=loadTasks;
+    $("reload-audit").onclick=loadAudit;
 
     $("login-btn").addEventListener("click",login);
     $("logout-btn").addEventListener("click",logout);
@@ -421,6 +503,7 @@
       if(ACCESS_TOKEN){
         await loadProjects();
         await loadTasks();
+        await loadAudit();
       }
     })();
   </script>
