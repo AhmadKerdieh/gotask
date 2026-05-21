@@ -398,6 +398,90 @@ it finishes the app's startup discovery will succeed.
   401s → you're bounced back to login. Log out hits Keycloak's
   end-session endpoint.
 
+## Phase 7 — Authorization, roles & audit
+
+The **403** half of the auth story (Phase 6 did the 401 half). This phase
+introduces a real authorization layer and an audit log; the Option A
+consequence becomes concrete.
+
+- **Three realm roles**: `member` (default — create/own), `manager`
+  (can act on others' tasks), `admin` (can list everyone's audit). The
+  hierarchy `admin → manager → member` is encoded once, in
+  `authz.HasRole`. The realm export grants all three to the `demo` user;
+  to exercise the negative paths, create a second user in the Keycloak
+  UI with only `member`.
+- **A new `internal/authz/` package**: pure authorization predicates —
+  no I/O, no HTTP — composable, exhaustively tested. The service calls
+  `authz.CanDeleteTask(claims, task)`; it does not open-code rules.
+- **The two-layer rule, in code**:
+    - **Middleware** for *route-coarse* checks (a planned admin-only
+      endpoint would use `RequireRole("admin")`). Middleware never
+      loads a resource — it has nothing to load it with.
+    - **Service** for *resource-fine* checks. The service loads the
+      task, calls the predicate, mutates, audits. Authorization,
+      business rules, and audit live in the SAME layer because they
+      are the same kind of decision: "given this resource and this
+      actor, may this operation proceed?"
+- **`UserClaims` moved to the authz package** (with a backwards-compat
+  alias in middleware). The architectural reason: the service must
+  depend on the claims type, and a middleware import would drag
+  `net/http` into the service via transitive dependency — breaking the
+  "service has no HTTP knowledge" invariant. Putting Claims in authz
+  fixes the layering cleanly.
+- **Audit log in Postgres** (`audit_log` table, migration `000003`).
+  Recorded by the SERVICE after each authorization-relevant operation
+  — **not** by middleware. Middleware sees HTTP, not outcomes; an
+  audit row claiming a delete succeeded when it actually failed mid-
+  transaction would be worse than no audit. The audit interface is
+  injected through `service.Deps`; tests use `audit.NewFake()`.
+- **Denied attempts are audited** with `outcome='denied'`. Security
+  review wants this as much as successes.
+- **The Option A consequence, made concrete** —
+  `internal/keycloakadmin/`: a small Admin API client (with TTL cache
+  + service-account token management) resolves Keycloak subs to
+  names/emails for audit responses. There is no local `users` table to
+  JOIN; this is the cost you signed up for in Phase 6, paid here. If
+  the admin client isn't configured, the app falls back to
+  `keycloakadmin.NoopLookup` and audit responses degrade gracefully to
+  subject-only.
+
+### New env vars
+
+```
+KEYCLOAK_ADMIN_BASE_URL=http://localhost:8081
+KEYCLOAK_REALM=gotask
+KEYCLOAK_ADMIN_CLIENT_ID=gotask-backend
+KEYCLOAK_ADMIN_CLIENT_SECRET=gotask-backend-secret
+```
+
+### Bringing up Phase 7
+
+The realm now defines three roles and a second client (`gotask-backend`)
+for the Admin API lookup. Keycloak must re-import the realm:
+
+```bash
+# Stop everything AND wipe the Keycloak DB so the realm import re-runs:
+docker compose -f docker/docker-compose.yml down -v
+make deps-up
+make migrate-up    # applies 000003 (audit_log)
+make run
+```
+
+The `-v` flag wipes both Postgres and Keycloak data. Postgres data loss
+in dev is acceptable; Keycloak data loss is *required* because an
+already-imported realm is not re-imported on restart, so the new roles
+and `gotask-backend` client only appear after a clean Keycloak volume.
+
+### What the frontend gains (Phase 7)
+
+- Role-aware action buttons: a `delete` button on a task you can't
+  delete simply doesn't render. The server is still the source of
+  truth (it returns 403), but the UI mirrors `authz.CanX` for clarity.
+- An **audit panel** showing recent activity. Members and managers see
+  their own history; admins get an actor filter input. Actor cells
+  show real names when the Admin API lookup is available, subjects
+  otherwise — the Option A trade-off visible at a glance.
+
 ## Run it
 
 ```bash

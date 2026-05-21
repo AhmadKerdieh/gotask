@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	"gotask/internal/apperror"
+	"gotask/internal/authz"
 	"gotask/internal/domain"
 	"gotask/internal/handler/dto"
 	"gotask/internal/middleware"
@@ -46,6 +47,19 @@ func (h *Handler) authedSubject(r *http.Request) (uuid.UUID, error) {
 		return uuid.Nil, apperror.Unauthorized("token subject is not a valid user id")
 	}
 	return id, nil
+}
+
+// authedClaims returns the verified claims. The auth middleware guarantees
+// these are present on every protected route; we still treat absence as
+// 401 (fail safe) rather than panicking, because a misconfigured route
+// mounted outside the auth group is the only realistic way to get here
+// without claims, and 401 is the honest answer.
+func (h *Handler) authedClaims(r *http.Request) (authz.Claims, error) {
+	c, ok := middleware.UserClaimsFromContext(r.Context())
+	if !ok || c.Subject == "" {
+		return authz.Claims{}, apperror.Unauthorized("no authenticated user on request")
+	}
+	return c, nil
 }
 
 // CreateTask handles POST /api/v1/tasks.
@@ -151,11 +165,19 @@ func (h *Handler) UpdateTaskStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := h.taskSvc.UpdateStatus(r.Context(), id, domain.Status(req.Status))
+	claims, err := h.authedClaims(r)
 	if err != nil {
-		// The service returns *service.TransitionError /
-		// service.ErrInvalidTransition for an illegal move; respondError
-		// already maps that to 409 invalid_transition.
+		h.respondError(w, r, err)
+		return
+	}
+
+	updated, err := h.taskSvc.UpdateStatus(r.Context(), claims, id, domain.Status(req.Status))
+	if err != nil {
+		// The service returns:
+		//  - *service.TransitionError / ErrInvalidTransition → 409
+		//  - service.ErrForbidden (you don't own this task)   → 403
+		//  - *service.ValidationError (unknown status)        → 422
+		// respondError already maps all of these.
 		h.respondError(w, r, err)
 		return
 	}
@@ -171,7 +193,14 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.taskSvc.Delete(r.Context(), id); err != nil {
+	claims, err := h.authedClaims(r)
+	if err != nil {
+		h.respondError(w, r, err)
+		return
+	}
+
+	if err := h.taskSvc.Delete(r.Context(), claims, id); err != nil {
+		// Service returns ErrForbidden if claims don't allow it → 403.
 		h.respondError(w, r, err)
 		return
 	}

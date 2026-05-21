@@ -16,8 +16,10 @@ import (
 	"syscall"
 	"time"
 
+	"gotask/internal/audit"
 	"gotask/internal/config"
 	"gotask/internal/database"
+	"gotask/internal/keycloakadmin"
 	"gotask/internal/middleware"
 	"gotask/internal/repository"
 	"gotask/internal/server"
@@ -109,10 +111,16 @@ func main() {
 	// the workflow. This is the seam that makes the service unit-testable
 	// against in-memory fakes — see internal/service/*_test.go. In
 	// production the same constructor gets the Postgres-backed repos.
+	// Construct the Postgres auditor before the services, because the
+	// services depend on it (they emit audit events on every mutation).
+	auditor := audit.NewPostgres(db.Pool)
+
+	// Build the services on top of the repositories and the auditor.
 	svcDeps := service.Deps{
 		Tasks:    taskRepo,
 		Projects: projectRepo,
 		Workflow: wf,
+		Auditor:  auditor,
 	}
 	taskSvc := service.NewTaskService(svcDeps)
 	projectSvc := service.NewProjectService(svcDeps)
@@ -141,6 +149,36 @@ func main() {
 		"client_id", cfg.OIDCClientID,
 	)
 
+	// Build the Keycloak Admin API lookup if configured. If the admin
+	// client id/secret are not set, fall back to the noop lookup so the
+	// app still runs — audit responses degrade gracefully to subject-only.
+	// This is Option A's "Keycloak is a runtime dependency for user info"
+	// made explicit and bounded: if Keycloak admin is unreachable, the
+	// app continues to function, just without enriched audit responses.
+	var userLookup keycloakadmin.Lookup
+	if cfg.KeycloakAdminClientID != "" && cfg.KeycloakAdminClientSecret != "" {
+		client, lerr := keycloakadmin.NewClient(keycloakadmin.Config{
+			Issuer:       cfg.OIDCIssuer,
+			AdminBaseURL: cfg.KeycloakAdminBaseURL,
+			Realm:        cfg.KeycloakRealm,
+			ClientID:     cfg.KeycloakAdminClientID,
+			ClientSecret: cfg.KeycloakAdminClientSecret,
+		})
+		if lerr != nil {
+			log.Error("keycloak admin lookup disabled", "error", lerr)
+			userLookup = keycloakadmin.NoopLookup{}
+		} else {
+			userLookup = client
+			log.Info("keycloak admin lookup ready",
+				"admin_base_url", cfg.KeycloakAdminBaseURL,
+				"realm", cfg.KeycloakRealm,
+			)
+		}
+	} else {
+		userLookup = keycloakadmin.NoopLookup{}
+		log.Info("keycloak admin lookup disabled (no admin credentials configured); audit responses will show subjects only")
+	}
+
 	// Build the HTTP handler. server.NewRouter is the single place routes
 	// and middleware are composed; main just hands over dependencies.
 	handler := server.NewRouter(server.Deps{
@@ -152,6 +190,8 @@ func main() {
 		TaskSvc:    taskSvc,
 		ProjectSvc: projectSvc,
 		Auth:       auth,
+		Auditor:    auditor,
+		UserLookup: userLookup,
 	})
 
 	srv := &http.Server{

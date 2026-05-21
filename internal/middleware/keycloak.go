@@ -66,12 +66,15 @@ func NewAuthenticator(ctx context.Context, issuer, clientID string) (*Authentica
 
 // rawClaims is the subset of the token payload we extract. Keycloak puts
 // the user id in "sub"; email/name come from the standard OIDC profile
-// scopes. We bind only what we use — extra claims are ignored, not an
-// error.
+// scopes; realm-level roles arrive nested under realm_access.roles. We
+// bind only what we use — extra claims are ignored, not an error.
 type rawClaims struct {
-	Subject string `json:"sub"`
-	Email   string `json:"email"`
-	Name    string `json:"name"`
+	Subject     string `json:"sub"`
+	Email       string `json:"email"`
+	Name        string `json:"name"`
+	RealmAccess struct {
+		Roles []string `json:"roles"`
+	} `json:"realm_access"`
 }
 
 // Middleware is the per-request guard. On success it injects the verified
@@ -122,6 +125,7 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			Subject: claims.Subject,
 			Email:   claims.Email,
 			Name:    claims.Name,
+			Roles:   claims.RealmAccess.Roles,
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
