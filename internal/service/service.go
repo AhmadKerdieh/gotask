@@ -3,41 +3,52 @@ package service
 import (
 	"gotask/internal/audit"
 	"gotask/internal/config"
+	"gotask/internal/database"
 	"gotask/internal/repository"
 )
 
-// Deps is the constructor input for the service layer. It carries the
-// repository INTERFACES (not the Postgres implementations), the workflow
-// config, and from Phase 7 the audit recorder.
+// Deps is the constructor input for the service layer.
 //
-// Because these are interfaces, production wiring injects the Postgres
-// repos + the Postgres auditor while tests inject in-memory fakes — the
-// service code is identical either way.
+// Phase 8 added DB so mutating service methods can begin transactions
+// via db.WithTx — required by the outbox pattern, where the business
+// write and the audit_outbox insert must be atomic.
+//
+// Note that we deliberately do NOT pass a pgxpool.Pool here: services
+// know about *database.DB (our internal wrapper) but never directly
+// about pgx. The WithTx helper hides pgx behind the database package's
+// boundary. If we ever swap the connection library, the change is
+// scoped to internal/database/ and internal/repository/.
 type Deps struct {
 	Tasks    repository.TaskRepository
 	Projects repository.ProjectRepository
 	Workflow *config.Workflow
 
-	// Auditor records authorization-relevant actions. The service emits
-	// audit events as part of business operations (NOT via middleware —
-	// middleware sees HTTP, not outcomes; see the audit package doc).
-	// May be nil during early-startup tests; the service guards against
-	// that by using the audit-or-noop helper.
+	// DB is needed for transactional service methods (Phase 8). May be
+	// nil in tests that don't exercise transactions; the service code
+	// guards against that and skips WithTx, calling repos directly.
+	// This nil-tolerance is what lets the Phase 7 fake-based tests
+	// continue to work without each gaining a real database.
+	DB *database.DB
+
+	// Auditor records to the audit_outbox (Phase 8). May be nil in
+	// tests; the service helper is nil-safe.
 	Auditor audit.Recorder
 }
 
-// TaskService holds task business logic. Fields are unexported; construct
-// with NewTaskService.
+// TaskService holds task business logic. Fields are unexported;
+// construct with NewTaskService.
 type TaskService struct {
 	tasks    repository.TaskRepository
 	projects repository.ProjectRepository
 	workflow *config.Workflow
+	db       *database.DB
 	auditor  audit.Recorder
 }
 
 // ProjectService holds project business logic.
 type ProjectService struct {
 	projects repository.ProjectRepository
+	db       *database.DB
 	auditor  audit.Recorder
 }
 
@@ -47,6 +58,7 @@ func NewTaskService(d Deps) *TaskService {
 		tasks:    d.Tasks,
 		projects: d.Projects,
 		workflow: d.Workflow,
+		db:       d.DB,
 		auditor:  d.Auditor,
 	}
 }
@@ -55,6 +67,7 @@ func NewTaskService(d Deps) *TaskService {
 func NewProjectService(d Deps) *ProjectService {
 	return &ProjectService{
 		projects: d.Projects,
+		db:       d.DB,
 		auditor:  d.Auditor,
 	}
 }

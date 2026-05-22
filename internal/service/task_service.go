@@ -5,9 +5,11 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"gotask/internal/audit"
 	"gotask/internal/authz"
+	"gotask/internal/database"
 	"gotask/internal/domain"
 	"gotask/internal/repository"
 )
@@ -89,54 +91,125 @@ func (s *TaskService) Create(ctx context.Context, in CreateTaskInput) (domain.Ta
 		return domain.Task{}, err
 	}
 
-	// 5. Persist. Convert the service input into the repository input
-	//    shape. The repository owns NULL/zero mapping; we just pass the
-	//    domain values.
-	created, err := s.tasks.Create(ctx, domain.NewTaskInput{
-		ProjectID:   in.ProjectID,
-		Title:       title,
-		Description: in.Description,
-		Status:      status,
-		Priority:    priority,
-		AssigneeID:  in.AssigneeID,
-		ReporterID:  in.ReporterID,
-	})
-	if err != nil {
-		return domain.Task{}, mapRepoError(err)
+	// 5. Persist + audit, atomically. This is the Phase 8 change:
+	//    instead of a plain repo call, we open a transaction, do the
+	//    task INSERT against the tx, then write the audit_outbox row
+	//    against the SAME tx. Either both commits land or neither
+	//    does — the row a user sees in /tasks/{id} is guaranteed to
+	//    have a corresponding audit row.
+	//
+	//    Path A's durability promise lives entirely in this WithTx
+	//    closure (and the equivalent ones in UpdateStatus, Delete, and
+	//    project Create). Outside this closure there is no atomicity
+	//    machinery; inside, there's no way to lose half of it.
+	//
+	//    The db nil-check is for tests that use fakes and don't supply
+	//    a DB. The fake repos and FakeAuditor ignore the runner anyway,
+	//    so we fall through to plain calls.
+	var created domain.Task
+	if s.db == nil {
+		c, err := s.tasks.Create(ctx, domain.NewTaskInput{
+			ProjectID:   in.ProjectID,
+			Title:       title,
+			Description: in.Description,
+			Status:      status,
+			Priority:    priority,
+			AssigneeID:  in.AssigneeID,
+			ReporterID:  in.ReporterID,
+		})
+		if err != nil {
+			return domain.Task{}, mapRepoError(err)
+		}
+		if err := s.audit(ctx, nil, audit.Event{
+			Actor:   in.ReporterID,
+			Action:  audit.ActionTaskCreated,
+			Target:  audit.Target{Kind: "task", ID: c.ID},
+			Outcome: audit.OutcomeSuccess,
+			Detail: map[string]any{
+				"project_id": c.ProjectID.String(),
+				"title":      c.Title,
+				"status":     string(c.Status),
+			},
+		}); err != nil {
+			return domain.Task{}, err
+		}
+		return c, nil
 	}
 
-	// 6. Audit. Recorded AFTER the operation succeeds, never before —
-	//    auditing a write that subsequently fails would leave the
-	//    history claiming an event that didn't happen. The audit call
-	//    failing does not fail the operation: see the helper.
-	s.audit(ctx, audit.Event{
-		Actor:   in.ReporterID,
-		Action:  audit.ActionTaskCreated,
-		Target:  audit.Target{Kind: "task", ID: created.ID},
-		Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{
-			"project_id": created.ProjectID.String(),
-			"title":      created.Title,
-			"status":     string(created.Status),
-		},
-	})
+	err := s.db.WithTx(ctx, func(tx pgx.Tx) error {
+		// Construct a tx-scoped task repo. The repository interface is
+		// unchanged; only its backing Queryer differs. This is why the
+		// Phase 8 refactor was cheap: we didn't have to thread tx
+		// through every method signature.
+		txTasks := repository.NewTaskRepositoryTx(tx)
 
+		c, err := txTasks.Create(ctx, domain.NewTaskInput{
+			ProjectID:   in.ProjectID,
+			Title:       title,
+			Description: in.Description,
+			Status:      status,
+			Priority:    priority,
+			AssigneeID:  in.AssigneeID,
+			ReporterID:  in.ReporterID,
+		})
+		if err != nil {
+			return mapRepoError(err)
+		}
+
+		// 6. Audit inside the same tx. If this fails, the WithTx helper
+		//    rolls back the transaction — the task is NOT persisted.
+		//    This is Path A's atomicity promise enforced at the lowest
+		//    practical layer.
+		if err := s.audit(ctx, tx, audit.Event{
+			Actor:   in.ReporterID,
+			Action:  audit.ActionTaskCreated,
+			Target:  audit.Target{Kind: "task", ID: c.ID},
+			Outcome: audit.OutcomeSuccess,
+			Detail: map[string]any{
+				"project_id": c.ProjectID.String(),
+				"title":      c.Title,
+				"status":     string(c.Status),
+			},
+		}); err != nil {
+			return err
+		}
+
+		created = c
+		return nil
+	})
+	if err != nil {
+		return domain.Task{}, err
+	}
 	return created, nil
 }
 
-// audit emits an event through the configured auditor. A nil auditor
-// (early-startup test scenarios) is a no-op rather than a panic. A
-// Record error is logged via the audit recorder's own concerns; we do
-// NOT let an audit-write failure fail the business operation, because
-// the operation has already succeeded — declaring it failed because we
-// couldn't log it would be a worse outcome than a brief gap in audit.
-// Persistent audit failure is an operational alarm condition; the
-// service is not the layer that surfaces that.
-func (s *TaskService) audit(ctx context.Context, e audit.Event) {
+// audit records an event through the configured Recorder. Phase 8
+// semantics changed substantially from Phase 7:
+//
+//   - The runner parameter (a Queryer, typically a pgx.Tx) carries the
+//     event into the audit_outbox table in the SAME transaction as the
+//     business write. The atomic property the whole outbox pattern is
+//     built on.
+//
+//   - If Record returns an error, we PROPAGATE it. The caller is
+//     inside a WithTx closure; returning the error causes the tx to
+//     roll back, undoing the business write AND the outbox insert
+//     together. This is the whole point of Path A: durability over
+//     latency. A task is deleted ⇔ an audit row exists.
+//
+//   - A nil auditor (test scenarios where the test doesn't care about
+//     audit) is a no-op, NOT an error. This preserves the Phase 4
+//     fakes-first testing model.
+//
+// This is the opposite Phase 7 of the swallow-errors choice. The
+// architectural choice from Path A makes audit a hard dependency of the
+// business operation; the helper enforces that by routing failures up,
+// not absorbing them.
+func (s *TaskService) audit(ctx context.Context, runner database.Queryer, e audit.Event) error {
 	if s.auditor == nil {
-		return
+		return nil
 	}
-	_ = s.auditor.Record(ctx, e)
+	return s.auditor.Record(ctx, runner, e)
 }
 
 // Get returns a single task or ErrNotFound.
@@ -181,7 +254,12 @@ func (s *TaskService) UpdateStatus(ctx context.Context, claims authz.Claims, id 
 	// someone TRIED to change a task they shouldn't is exactly what
 	// security review wants.
 	if !authz.CanChangeTaskStatus(claims, current) {
-		s.audit(ctx, audit.Event{
+		// Audit the denial. With Phase 8 semantics this also runs in
+		// its own tx — the denial audit row is its own atomic unit
+		// (there's no business mutation to roll back along with it,
+		// but the outbox insert still belongs in a transaction so it
+		// behaves uniformly with the success path).
+		if auditErr := s.recordOutboxOnly(ctx, audit.Event{
 			Actor:   authz.Subject(claims),
 			Action:  audit.ActionTaskStatusChanged,
 			Target:  audit.Target{Kind: "task", ID: id},
@@ -190,7 +268,13 @@ func (s *TaskService) UpdateStatus(ctx context.Context, claims authz.Claims, id 
 				"reason": "not owner and not manager",
 				"to":     string(to),
 			},
-		})
+		}); auditErr != nil {
+			// Even denied-audit failures must surface. Auditing is
+			// non-optional under Path A. A 5xx is the right answer:
+			// "we couldn't honestly record what just happened, so
+			// we cannot honestly return the result either."
+			return domain.Task{}, auditErr
+		}
 		return domain.Task{}, ErrForbidden
 	}
 
@@ -207,22 +291,64 @@ func (s *TaskService) UpdateStatus(ctx context.Context, claims authz.Claims, id 
 		return domain.Task{}, &TransitionError{From: from, To: string(to)}
 	}
 
-	updated, err := s.tasks.Update(ctx, id, repository.UpdateTaskInput{
-		Status: &to,
-	})
-	if err != nil {
-		return domain.Task{}, mapRepoError(err)
+	// Mutation + audit in one tx. Same shape as Create.
+	var updated domain.Task
+	if s.db == nil {
+		u, err := s.tasks.Update(ctx, id, repository.UpdateTaskInput{Status: &to})
+		if err != nil {
+			return domain.Task{}, mapRepoError(err)
+		}
+		if err := s.audit(ctx, nil, audit.Event{
+			Actor:   authz.Subject(claims),
+			Action:  audit.ActionTaskStatusChanged,
+			Target:  audit.Target{Kind: "task", ID: id},
+			Outcome: audit.OutcomeSuccess,
+			Detail:  map[string]any{"from": from, "to": string(to)},
+		}); err != nil {
+			return domain.Task{}, err
+		}
+		return u, nil
 	}
 
-	s.audit(ctx, audit.Event{
-		Actor:   authz.Subject(claims),
-		Action:  audit.ActionTaskStatusChanged,
-		Target:  audit.Target{Kind: "task", ID: id},
-		Outcome: audit.OutcomeSuccess,
-		Detail:  map[string]any{"from": from, "to": string(to)},
+	err = s.db.WithTx(ctx, func(tx pgx.Tx) error {
+		txTasks := repository.NewTaskRepositoryTx(tx)
+		u, err := txTasks.Update(ctx, id, repository.UpdateTaskInput{Status: &to})
+		if err != nil {
+			return mapRepoError(err)
+		}
+		if err := s.audit(ctx, tx, audit.Event{
+			Actor:   authz.Subject(claims),
+			Action:  audit.ActionTaskStatusChanged,
+			Target:  audit.Target{Kind: "task", ID: id},
+			Outcome: audit.OutcomeSuccess,
+			Detail:  map[string]any{"from": from, "to": string(to)},
+		}); err != nil {
+			return err
+		}
+		updated = u
+		return nil
 	})
-
+	if err != nil {
+		return domain.Task{}, err
+	}
 	return updated, nil
+}
+
+// recordOutboxOnly writes a single audit event in its own transaction.
+// Used for the denial path, where there's no business mutation to
+// atomic-bundle with. We still wrap it in a tx for uniform error-
+// handling (the WithTx helper owns the rollback discipline; calling
+// Record directly against the pool would leave us to reimplement it).
+func (s *TaskService) recordOutboxOnly(ctx context.Context, e audit.Event) error {
+	if s.auditor == nil {
+		return nil
+	}
+	if s.db == nil {
+		return s.auditor.Record(ctx, nil, e)
+	}
+	return s.db.WithTx(ctx, func(tx pgx.Tx) error {
+		return s.auditor.Record(ctx, tx, e)
+	})
 }
 
 // Delete removes a task or returns ErrNotFound. Authorization: only the
@@ -234,31 +360,51 @@ func (s *TaskService) Delete(ctx context.Context, claims authz.Claims, id uuid.U
 	}
 
 	if !authz.CanDeleteTask(claims, current) {
-		s.audit(ctx, audit.Event{
+		if auditErr := s.recordOutboxOnly(ctx, audit.Event{
 			Actor:   authz.Subject(claims),
 			Action:  audit.ActionTaskDeleted,
 			Target:  audit.Target{Kind: "task", ID: id},
 			Outcome: audit.OutcomeDenied,
 			Detail:  map[string]any{"reason": "not owner and not manager"},
-		})
+		}); auditErr != nil {
+			return auditErr
+		}
 		return ErrForbidden
 	}
 
-	if err := s.tasks.Delete(ctx, id); err != nil {
-		return mapRepoError(err)
+	// Delete + audit, atomic. Same shape as the other mutators.
+	if s.db == nil {
+		if err := s.tasks.Delete(ctx, id); err != nil {
+			return mapRepoError(err)
+		}
+		return s.audit(ctx, nil, audit.Event{
+			Actor:   authz.Subject(claims),
+			Action:  audit.ActionTaskDeleted,
+			Target:  audit.Target{Kind: "task", ID: id},
+			Outcome: audit.OutcomeSuccess,
+			Detail: map[string]any{
+				"project_id": current.ProjectID.String(),
+				"title":      current.Title,
+			},
+		})
 	}
 
-	s.audit(ctx, audit.Event{
-		Actor:   authz.Subject(claims),
-		Action:  audit.ActionTaskDeleted,
-		Target:  audit.Target{Kind: "task", ID: id},
-		Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{
-			"project_id": current.ProjectID.String(),
-			"title":      current.Title,
-		},
+	return s.db.WithTx(ctx, func(tx pgx.Tx) error {
+		txTasks := repository.NewTaskRepositoryTx(tx)
+		if err := txTasks.Delete(ctx, id); err != nil {
+			return mapRepoError(err)
+		}
+		return s.audit(ctx, tx, audit.Event{
+			Actor:   authz.Subject(claims),
+			Action:  audit.ActionTaskDeleted,
+			Target:  audit.Target{Kind: "task", ID: id},
+			Outcome: audit.OutcomeSuccess,
+			Detail: map[string]any{
+				"project_id": current.ProjectID.String(),
+				"title":      current.Title,
+			},
+		})
 	})
-	return nil
 }
 
 // isRepoNotFound reports whether a repository error represents "no such

@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"gotask/internal/audit"
 	"gotask/internal/config"
 	"gotask/internal/database"
@@ -120,6 +122,7 @@ func main() {
 		Tasks:    taskRepo,
 		Projects: projectRepo,
 		Workflow: wf,
+		DB:       db,
 		Auditor:  auditor,
 	}
 	taskSvc := service.NewTaskService(svcDeps)
@@ -194,6 +197,15 @@ func main() {
 		UserLookup: userLookup,
 	})
 
+	// Construct the audit drainer. This is the headline goroutine of
+	// Phase 8 — it owns the asynchronous outbox→audit_log pipeline.
+	// See internal/audit/drainer.go for the four-questions discipline
+	// applied to its design.
+	drainer := audit.NewDrainer(db.Pool, log, audit.DrainerConfig{
+		PollInterval: cfg.AuditDrainInterval,
+		BatchSize:    cfg.AuditDrainBatchSize,
+	})
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           handler,
@@ -203,8 +215,74 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	// Run the server in a goroutine so the main goroutine can wait on
-	// signals and trigger a graceful shutdown.
+	// ── Process lifecycle (Phase 8) ──────────────────────────────────
+	//
+	// We have two long-lived goroutines that need coordinated shutdown:
+	//
+	//   1. The HTTP server (accepts requests, runs handlers)
+	//   2. The audit drainer (consumes from audit_outbox, writes to
+	//      audit_log)
+	//
+	// The choice from Path A was STRICTLY SEQUENTIAL shutdown:
+	//
+	//   SIGTERM → stop accepting new requests (HTTP first)
+	//           → wait for in-flight requests to finish
+	//           → drain remaining audit_outbox rows
+	//           → close DB pool
+	//
+	// Why this order:
+	//
+	//   - Stopping HTTP first guarantees no NEW outbox rows arrive
+	//     after this point. The drainer's "drain everything pending"
+	//     is well-defined.
+	//
+	//   - The drainer must finish AFTER HTTP because any in-flight
+	//     mutation that committed during HTTP shutdown produces a row
+	//     the drainer is responsible for moving to audit_log. Closing
+	//     the drainer first would orphan those rows in the outbox
+	//     until next start — they'd eventually drain, but the
+	//     durability promise is "drained at shutdown", not "drained
+	//     eventually".
+	//
+	//   - The DB pool is closed LAST because both the HTTP handlers
+	//     and the drainer need it until they're done.
+	//
+	// The signal handler triggers this by cancelling a root context
+	// the drainer observes. The HTTP server is shut down explicitly
+	// via srv.Shutdown(ctx) because it doesn't itself observe a
+	// context — Go's http.Server pre-dates context cancellation as
+	// the universal shutdown signal.
+
+	// Root context cancelled when SIGTERM arrives. Drainer observes it.
+	rootCtx, rootCancel := context.WithCancel(context.Background())
+	defer rootCancel()
+
+	// Signal handler converts SIGTERM/SIGINT into rootCtx cancellation.
+	// We use a dedicated goroutine because signal.Notify pushes to a
+	// channel and we want the rest of main to be the lifecycle code.
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-shutdown
+		log.Info("shutdown signal received", "signal", sig.String())
+		rootCancel()
+	}()
+
+	// Start the drainer in its own goroutine. Run blocks until ctx is
+	// cancelled, then returns nil on clean shutdown. errgroup is
+	// overkill for this many goroutines, but using it here keeps the
+	// pattern in front of us — future workers slot in as additional
+	// g.Go calls without restructuring.
+	g, gctx := errgroup.WithContext(rootCtx)
+	g.Go(func() error {
+		return drainer.Run(gctx)
+	})
+
+	// Start the HTTP server. We do NOT add it as g.Go because Go's
+	// http.Server has a different shutdown protocol (Shutdown(ctx)
+	// rather than context-observation); mixing the two in the same
+	// errgroup makes the lifecycle harder to read, not easier. We
+	// run it in a plain goroutine and wait for its error separately.
 	serverErr := make(chan error, 1)
 	go func() {
 		log.Info("server starting",
@@ -217,33 +295,64 @@ func main() {
 		serverErr <- srv.ListenAndServe()
 	}()
 
-	shutdown := make(chan os.Signal, 1)
-	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
-
+	// Main goroutine: wait for either a server crash or a shutdown
+	// signal (which cancels gctx, which we observe via gctx.Done()).
 	select {
 	case err := <-serverErr:
+		// Server stopped on its own — usually means a bind failure on
+		// startup. http.ErrServerClosed is the clean-Shutdown sentinel
+		// and only appears AFTER we've called srv.Shutdown, which
+		// hasn't happened in this branch.
 		if !errors.Is(err, http.ErrServerClosed) {
 			log.Error("server failed", "error", err)
-			os.Exit(1)
-		}
-
-	case sig := <-shutdown:
-		log.Info("shutdown initiated", "signal", sig.String())
-
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		if err := srv.Shutdown(ctx); err != nil {
-			log.Error("graceful shutdown failed; forcing close", "error", err)
-			_ = srv.Close()
+			rootCancel() // signal drainer to stop
+			_ = g.Wait()
 			db.Close()
 			os.Exit(1)
 		}
 
-		// Close the pool only AFTER the HTTP server has stopped accepting
-		// and finished in-flight requests. Closing it earlier would yank
-		// the database out from under requests that are still running.
+	case <-gctx.Done():
+		// SIGTERM arrived (rootCtx cancelled) OR the drainer returned
+		// an error (errgroup cancels gctx on first error). Either way
+		// it's time to shut down everything else.
+
+		// Step 1: stop HTTP. srv.Shutdown blocks until in-flight
+		// requests finish OR the shutdown ctx times out. We bound
+		// this independently of the cancelled rootCtx because using
+		// the cancelled ctx would make Shutdown return immediately
+		// without draining — we want it to actually wait.
+		log.Info("step 1/3: stopping HTTP server (draining in-flight requests)")
+		httpShutdownCtx, httpCancel := context.WithTimeout(
+			context.Background(),
+			cfg.ShutdownTimeout,
+		)
+		if err := srv.Shutdown(httpShutdownCtx); err != nil {
+			log.Error("graceful HTTP shutdown failed; forcing close", "error", err)
+			_ = srv.Close()
+		} else {
+			log.Info("HTTP server stopped cleanly")
+		}
+		httpCancel()
+
+		// Step 2: drain remaining audit_outbox rows. The drainer is
+		// observing rootCtx (cancelled) — its Run loop will return
+		// after the current iteration. We wait for it via errgroup.
+		//
+		// IMPORTANT: at this point no new outbox rows are being
+		// produced (HTTP is stopped), so the drainer's next iteration
+		// processes the final accumulated batch and exits. Worst-case
+		// duration is one PollInterval + batch processing time.
+		log.Info("step 2/3: waiting for audit drainer to finish")
+		if err := g.Wait(); err != nil {
+			log.Error("drainer exited with error", "error", err)
+		} else {
+			log.Info("audit drainer stopped cleanly")
+		}
+
+		// Step 3: close the DB pool. Nothing else holds it now.
+		log.Info("step 3/3: closing DB pool")
 		db.Close()
 		log.Info("shutdown complete")
 	}
+}
 }

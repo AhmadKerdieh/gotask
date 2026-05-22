@@ -5,9 +5,11 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"gotask/internal/audit"
 	"gotask/internal/domain"
+	"gotask/internal/repository"
 )
 
 // CreateProjectInput is the service-level input for creating a project.
@@ -53,31 +55,66 @@ func (s *ProjectService) Create(ctx context.Context, in CreateProjectInput) (dom
 		return domain.Project{}, err
 	}
 
-	created, err := s.projects.Create(ctx, domain.NewProjectInput{
-		Key:         key,
-		Name:        name,
-		Description: in.Description,
-		OwnerID:     in.OwnerID,
+	// Persist + audit, atomically. Same Path A discipline as the task
+	// mutators: project insert and audit_outbox insert in one tx, so
+	// the project exists only if its audit row does and vice versa.
+	if s.db == nil {
+		created, err := s.projects.Create(ctx, domain.NewProjectInput{
+			Key:         key,
+			Name:        name,
+			Description: in.Description,
+			OwnerID:     in.OwnerID,
+		})
+		if err != nil {
+			return domain.Project{}, mapRepoError(err)
+		}
+		if s.auditor != nil {
+			if err := s.auditor.Record(ctx, nil, audit.Event{
+				Actor:   in.OwnerID,
+				Action:  audit.ActionProjectCreated,
+				Target:  audit.Target{Kind: "project", ID: created.ID},
+				Outcome: audit.OutcomeSuccess,
+				Detail:  map[string]any{"key": created.Key, "name": created.Name},
+			}); err != nil {
+				return domain.Project{}, err
+			}
+		}
+		return created, nil
+	}
+
+	var created domain.Project
+	err := s.db.WithTx(ctx, func(tx pgx.Tx) error {
+		txProjects := repository.NewProjectRepositoryTx(tx)
+		c, err := txProjects.Create(ctx, domain.NewProjectInput{
+			Key:         key,
+			Name:        name,
+			Description: in.Description,
+			OwnerID:     in.OwnerID,
+		})
+		if err != nil {
+			// A duplicate key surfaces from the repository as a
+			// conflict (unique violation). Translate to the service
+			// vocabulary so the handler maps it to 409 without
+			// knowing about pg codes.
+			return mapRepoError(err)
+		}
+		if s.auditor != nil {
+			if err := s.auditor.Record(ctx, tx, audit.Event{
+				Actor:   in.OwnerID,
+				Action:  audit.ActionProjectCreated,
+				Target:  audit.Target{Kind: "project", ID: c.ID},
+				Outcome: audit.OutcomeSuccess,
+				Detail:  map[string]any{"key": c.Key, "name": c.Name},
+			}); err != nil {
+				return err
+			}
+		}
+		created = c
+		return nil
 	})
 	if err != nil {
-		// A duplicate key surfaces from the repository as a conflict
-		// (unique violation). Translate to the service vocabulary so
-		// the handler maps it to 409 without knowing about pg codes.
-		return domain.Project{}, mapRepoError(err)
+		return domain.Project{}, err
 	}
-
-	// Audit after success. Actor and owner are the same here (the
-	// authenticated user owns what they create).
-	if s.auditor != nil {
-		_ = s.auditor.Record(ctx, audit.Event{
-			Actor:   in.OwnerID,
-			Action:  audit.ActionProjectCreated,
-			Target:  audit.Target{Kind: "project", ID: created.ID},
-			Outcome: audit.OutcomeSuccess,
-			Detail:  map[string]any{"key": created.Key, "name": created.Name},
-		})
-	}
-
 	return created, nil
 }
 
