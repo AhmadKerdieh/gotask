@@ -91,6 +91,27 @@ type Config struct {
 	KeycloakRealm             string `mapstructure:"KEYCLOAK_REALM"`
 	KeycloakAdminClientID     string `mapstructure:"KEYCLOAK_ADMIN_CLIENT_ID"`
 	KeycloakAdminClientSecret string `mapstructure:"KEYCLOAK_ADMIN_CLIENT_SECRET"`
+
+	// ── Phase 8: concurrency & lifecycle ───────────────────────────────
+	//
+	// AuditDrainInterval is how often the audit drainer polls the
+	// audit_outbox table when there's no recent work. Shorter = lower
+	// audit lag, more empty queries. 1s is the conservative starting
+	// value; if you saw outbox growth in metrics you'd lower this
+	// before raising BatchSize.
+	AuditDrainInterval time.Duration `mapstructure:"AUDIT_DRAIN_INTERVAL"`
+
+	// AuditDrainBatchSize bounds how many outbox rows the drainer
+	// processes per iteration. Higher = better commit amortisation;
+	// lower = shorter per-iteration lock window.
+	AuditDrainBatchSize int `mapstructure:"AUDIT_DRAIN_BATCH_SIZE"`
+
+	// ShutdownTimeout bounds graceful shutdown. Should comfortably
+	// exceed RequestTimeout (15s) so an in-flight long request can
+	// finish; we default to 30s. Phase 5 flagged this as backlog item
+	// 2 ("graceful-shutdown timeout < REQUEST_TIMEOUT") — Phase 8
+	// resolves it.
+	ShutdownTimeout time.Duration `mapstructure:"SHUTDOWN_TIMEOUT"`
 }
 
 // Load reads the .env file (if present) and overlays environment variables,
@@ -114,6 +135,9 @@ func Load() (*Config, error) {
 	v.SetDefault("OIDC_CLIENT_ID", "gotask-spa")
 	v.SetDefault("KEYCLOAK_ADMIN_BASE_URL", "http://localhost:8081")
 	v.SetDefault("KEYCLOAK_REALM", "gotask")
+	v.SetDefault("AUDIT_DRAIN_INTERVAL", "1s")
+	v.SetDefault("AUDIT_DRAIN_BATCH_SIZE", 100)
+	v.SetDefault("SHUTDOWN_TIMEOUT", "30s")
 
 	// .env file lookup.
 	v.SetConfigName(".env")
@@ -197,6 +221,21 @@ func (c *Config) validate() error {
 	}
 	if c.OIDCClientID == "" {
 		return fmt.Errorf("config: OIDC_CLIENT_ID is required (this app's client in the realm)")
+	}
+	if c.AuditDrainInterval <= 0 {
+		return fmt.Errorf("config: AUDIT_DRAIN_INTERVAL must be positive, got %s", c.AuditDrainInterval)
+	}
+	if c.AuditDrainBatchSize <= 0 {
+		return fmt.Errorf("config: AUDIT_DRAIN_BATCH_SIZE must be positive, got %d", c.AuditDrainBatchSize)
+	}
+	if c.ShutdownTimeout <= 0 {
+		return fmt.Errorf("config: SHUTDOWN_TIMEOUT must be positive, got %s", c.ShutdownTimeout)
+	}
+	if c.ShutdownTimeout <= c.RequestTimeout {
+		// The Phase 5 backlog item: shutdown must comfortably exceed
+		// per-request timeout so an in-flight long request can finish.
+		return fmt.Errorf("config: SHUTDOWN_TIMEOUT (%s) must exceed REQUEST_TIMEOUT (%s)",
+			c.ShutdownTimeout, c.RequestTimeout)
 	}
 	return nil
 }

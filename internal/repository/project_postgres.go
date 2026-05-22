@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"gotask/internal/database"
 	"gotask/internal/domain"
 )
 
@@ -14,15 +15,24 @@ import (
 // unexported: callers receive it as the ProjectRepository interface from
 // NewProjectRepository and never name the concrete type. This keeps the
 // storage technology a private implementation detail.
+//
+// runner is a database.Queryer — either the pool (default) or a pgx.Tx
+// when the repo is scoped to a transaction. See task_postgres.go for
+// the full reasoning; this is the same pattern applied to projects.
 type projectPostgres struct {
-	pool *pgxpool.Pool
+	runner database.Queryer
 }
 
-// NewProjectRepository returns a Postgres-backed ProjectRepository. The
-// return type is the interface, not *projectPostgres — the compiler
-// enforces that callers cannot depend on Postgres-specific behaviour.
+// NewProjectRepository returns a Postgres-backed ProjectRepository
+// bound to the connection pool.
 func NewProjectRepository(pool *pgxpool.Pool) ProjectRepository {
-	return &projectPostgres{pool: pool}
+	return &projectPostgres{runner: pool}
+}
+
+// NewProjectRepositoryTx returns a ProjectRepository scoped to a
+// specific transaction. Valid only for the lifetime of that tx.
+func NewProjectRepositoryTx(tx pgx.Tx) ProjectRepository {
+	return &projectPostgres{runner: tx}
 }
 
 // projectColumns is the canonical column list, declared once so the
@@ -57,7 +67,7 @@ func (r *projectPostgres) Create(ctx context.Context, in domain.NewProjectInput)
 		VALUES ($1, $2, $3, $4)
 		RETURNING ` + projectColumns
 
-	row := r.pool.QueryRow(ctx, q,
+	row := r.runner.QueryRow(ctx, q,
 		in.Key,
 		in.Name,
 		in.Description,
@@ -74,7 +84,7 @@ func (r *projectPostgres) Create(ctx context.Context, in domain.NewProjectInput)
 func (r *projectPostgres) GetByID(ctx context.Context, id uuid.UUID) (domain.Project, error) {
 	const q = `SELECT ` + projectColumns + ` FROM projects WHERE id = $1`
 
-	p, err := scanProject(r.pool.QueryRow(ctx, q, id))
+	p, err := scanProject(r.runner.QueryRow(ctx, q, id))
 	if err != nil {
 		return domain.Project{}, translateError(err, "project")
 	}
@@ -84,7 +94,7 @@ func (r *projectPostgres) GetByID(ctx context.Context, id uuid.UUID) (domain.Pro
 func (r *projectPostgres) List(ctx context.Context) ([]domain.Project, error) {
 	const q = `SELECT ` + projectColumns + ` FROM projects ORDER BY created_at DESC`
 
-	rows, err := r.pool.Query(ctx, q)
+	rows, err := r.runner.Query(ctx, q)
 	if err != nil {
 		return nil, translateError(err, "project")
 	}
@@ -114,7 +124,7 @@ func (r *projectPostgres) List(ctx context.Context) ([]domain.Project, error) {
 func (r *projectPostgres) Delete(ctx context.Context, id uuid.UUID) error {
 	const q = `DELETE FROM projects WHERE id = $1`
 
-	tag, err := r.pool.Exec(ctx, q, id)
+	tag, err := r.runner.Exec(ctx, q, id)
 	if err != nil {
 		return translateError(err, "project")
 	}

@@ -6,15 +6,19 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"gotask/internal/database"
 )
 
-// FakeAuditor is an in-memory Auditor for use in service tests. Like the
-// repository fakes, it really works — Record appends, List filters and
-// orders — so tests assert on OUTCOMES (the events that were recorded),
-// not on internal call shapes. A second test file may want to assert
-// interactions (mock-style); for that, wrap one of these in a mock if
-// needed. Most tests want the fake: it answers "did the service emit
-// exactly the right audit event when the user deleted their own task?"
+// FakeAuditor is an in-memory Auditor for use in service tests. It
+// satisfies the Phase 8 Recorder signature (which takes a Queryer for
+// transactional outbox writes) by IGNORING the runner parameter — tests
+// don't have a real transaction and don't care; they want to know what
+// events the service emitted.
+//
+// Like the repository fakes, it really works — Record appends, List
+// filters and orders — so tests assert on OUTCOMES (the events that
+// were recorded), not on internal call shapes.
 //
 // Safe for concurrent use; the mutex is cheap and prevents future
 // parallel-tests flakiness.
@@ -27,7 +31,9 @@ type FakeAuditor struct {
 // NewFake returns an empty FakeAuditor.
 func NewFake() *FakeAuditor { return &FakeAuditor{} }
 
-func (f *FakeAuditor) Record(ctx context.Context, e Event) error {
+// Record matches the Phase 8 Recorder signature; the runner parameter
+// is unused. Tests get the same observable behaviour as in Phase 7.
+func (f *FakeAuditor) Record(ctx context.Context, _ database.Queryer, e Event) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.nextSeq++

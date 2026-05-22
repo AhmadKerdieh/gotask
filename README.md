@@ -482,6 +482,117 @@ and `gotask-backend` client only appear after a clean Keycloak volume.
   show real names when the Admin API lookup is available, subjects
   otherwise — the Option A trade-off visible at a glance.
 
+## Phase 8 — Concurrency: transactions, outbox & graceful shutdown
+
+The Go-specific phase. By the end the app has a real, principled
+approach to concurrency: every long-lived goroutine has documented
+answers to the four questions (who starts it, who stops it, what
+happens to in-flight work at shutdown, what happens on panic), and the
+audit pipeline has a durability property no in-process design can give:
+**a successful business write implies an audit row exists, atomically**.
+
+You chose **Path A** in the design questions: the durable outbox
+pattern with transactions throughout. The trade-off was deliberate:
+~200 extra lines and a new table in exchange for atomicity that
+survives process crashes, kernel panics, and network cuts mid-write.
+
+- **Transactions at the service layer.** `internal/database/tx.go`
+  introduces `Queryer` (an interface satisfied by both `*pgxpool.Pool`
+  and `pgx.Tx`) and `WithTx`, a helper that encapsulates
+  begin/rollback-on-error/rollback-on-panic/commit correctly. Every
+  mutating service method (`Create`, `UpdateStatus`, `Delete` on tasks;
+  `Create` on projects) now wraps its work in `WithTx`.
+- **Repositories accept a Queryer, not a pool.** Each Postgres
+  repository now holds a `Queryer` (default: the pool); new
+  `NewTaskRepositoryTx(tx)` / `NewProjectRepositoryTx(tx)` constructors
+  return tx-scoped repos that share the same interface. No method
+  signatures changed.
+- **The audit outbox** (migration `000004_audit_outbox`). The Recorder
+  no longer writes to `audit_log` directly; it writes to
+  `audit_outbox` using the SAME transaction as the business write.
+  Atomicity is enforced by Postgres — both rows live or both die.
+- **The drainer goroutine** (`internal/audit/drainer.go`). Background
+  worker that polls the outbox, claims rows with
+  `FOR UPDATE SKIP LOCKED`, INSERTs to `audit_log` with
+  `ON CONFLICT (id) DO NOTHING` (idempotent — duplicate drains are
+  no-ops), DELETEs from the outbox. All in one transaction per batch.
+  Documented in detail because it's the headline goroutine of the
+  phase.
+- **errgroup-based lifecycle.** `cmd/api/main.go` is restructured
+  around `golang.org/x/sync/errgroup`. The signal handler cancels a
+  root context; the drainer observes it via `gctx.Done()`. Shutdown
+  is **strictly sequential** (your other Phase 8 choice): HTTP first
+  (stops accepting new requests → no new outbox rows), then drain
+  remaining outbox, then close the DB pool.
+- **`SHUTDOWN_TIMEOUT` resolved.** Phase 5 backlog item 2 ("graceful-
+  shutdown timeout 10s < REQUEST_TIMEOUT 15s") is fixed: shutdown is
+  configurable, defaults to 30s, and config validation requires it to
+  exceed `REQUEST_TIMEOUT`.
+- **Audit-as-hard-dependency.** Phase 7's audit-failure-is-best-effort
+  policy is reversed under Path A: an audit write failure now rolls
+  back the business write. This is what the durability promise costs
+  — when audit is degraded, mutations fail with 5xx rather than
+  succeeding silently with no audit record.
+
+### New env vars
+
+```
+AUDIT_DRAIN_INTERVAL=1s
+AUDIT_DRAIN_BATCH_SIZE=100
+SHUTDOWN_TIMEOUT=30s
+```
+
+### Bringing up Phase 8
+
+```bash
+make migrate-up         # applies 000004 (audit_outbox table)
+make run                # logs "audit drainer started" alongside server starting
+```
+
+You should see new startup lines:
+
+```
+msg="audit drainer started" poll_interval=1s batch_size=100
+msg="server starting" ...
+```
+
+On Ctrl+C or SIGTERM you'll see the three-step sequential shutdown:
+
+```
+msg="shutdown signal received" signal=interrupt
+msg="step 1/3: stopping HTTP server (draining in-flight requests)"
+msg="HTTP server stopped cleanly"
+msg="step 2/3: waiting for audit drainer to finish"
+msg="audit drainer stopping" reason="context canceled"
+msg="audit drainer stopped cleanly"
+msg="step 3/3: closing DB pool"
+msg="shutdown complete"
+```
+
+That ordering is the architectural promise made physical. Each step
+prints because each step matters — if shutdown ever stalls in
+production, the last log line tells you where.
+
+### Backlog after Phase 8
+
+The Phase 5 backlog is now mostly paid down. Remaining tracked items:
+
+1. ~~Integration tests (deferred to Phase 10).~~ Still pending.
+2. ~~Graceful-shutdown timeout hardcoded.~~ **Resolved in Phase 8.**
+3. **Service↔repository error coupling** uses string matching
+   (`mapRepoError`). Still deferred — Phase 9.
+4. **Option A: no local users table** (Phase 6 decision, permanent).
+   Not a defect; the trade-off remains explicit.
+5. **NEW: token-cache cleanup worker** for `keycloakadmin.Client`.
+   The cache uses TTL-checked reads (expired entries are invisible),
+   but expired map entries are never evicted, so memory grows slowly
+   over months. Add a small ticker-driven sweeper. Deferred to
+   Phase 9 because it's a memory-hygiene polish, not a correctness
+   bug.
+6. **NEW: outbox observability.** A growing `audit_outbox` row count
+   means the drainer is falling behind. Expose this as a metric in
+   Phase 9 (observability) so operators can alarm on it.
+
 ## Run it
 
 ```bash

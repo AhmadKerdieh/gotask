@@ -10,20 +10,37 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"gotask/internal/database"
 	"gotask/internal/domain"
 )
 
 // taskPostgres is the Postgres-backed TaskRepository. Unexported for the
 // same reason as projectPostgres: the storage technology is a private
 // detail behind the TaskRepository interface.
+//
+// The runner is a Queryer (database.Queryer): either a *pgxpool.Pool
+// (the default — fresh connection per query) or a pgx.Tx (when this
+// repo is scoped to a transaction via NewTaskRepositoryTx). Phase 8
+// introduced this so the same repository code can execute either
+// against the pool (no transaction) or inside a service-managed tx,
+// without duplicating method bodies.
 type taskPostgres struct {
-	pool *pgxpool.Pool
+	runner database.Queryer
 }
 
-// NewTaskRepository returns a Postgres-backed TaskRepository as the
-// interface type.
+// NewTaskRepository returns a Postgres-backed TaskRepository bound to
+// the connection pool. This is the production wiring used by main.go.
 func NewTaskRepository(pool *pgxpool.Pool) TaskRepository {
-	return &taskPostgres{pool: pool}
+	return &taskPostgres{runner: pool}
+}
+
+// NewTaskRepositoryTx returns a TaskRepository bound to a specific
+// transaction. Constructed inside database.WithTx by the service when a
+// task operation must be atomic with other writes (e.g. the audit
+// outbox insert). The returned value is valid only for the lifetime of
+// that transaction.
+func NewTaskRepositoryTx(tx pgx.Tx) TaskRepository {
+	return &taskPostgres{runner: tx}
 }
 
 const taskColumns = `id, project_id, title, description, status, priority,
@@ -98,7 +115,7 @@ func (r *taskPostgres) Create(ctx context.Context, in domain.NewTaskInput) (doma
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING ` + taskColumns
 
-	row := r.pool.QueryRow(ctx, q,
+	row := r.runner.QueryRow(ctx, q,
 		in.ProjectID,
 		in.Title,
 		in.Description,
@@ -119,7 +136,7 @@ func (r *taskPostgres) Create(ctx context.Context, in domain.NewTaskInput) (doma
 func (r *taskPostgres) GetByID(ctx context.Context, id uuid.UUID) (domain.Task, error) {
 	const q = `SELECT ` + taskColumns + ` FROM tasks WHERE id = $1`
 
-	t, err := scanTask(r.pool.QueryRow(ctx, q, id))
+	t, err := scanTask(r.runner.QueryRow(ctx, q, id))
 	if err != nil {
 		return domain.Task{}, translateError(err, "task")
 	}
@@ -172,7 +189,7 @@ func (r *taskPostgres) List(ctx context.Context, f TaskFilter) ([]domain.Task, e
 		args = append(args, f.Offset)
 	}
 
-	rows, err := r.pool.Query(ctx, q, args...)
+	rows, err := r.runner.Query(ctx, q, args...)
 	if err != nil {
 		return nil, translateError(err, "task")
 	}
@@ -245,7 +262,7 @@ func (r *taskPostgres) Update(ctx context.Context, id uuid.UUID, in UpdateTaskIn
 	)
 	args = append(args, id)
 
-	t, err := scanTask(r.pool.QueryRow(ctx, q, args...))
+	t, err := scanTask(r.runner.QueryRow(ctx, q, args...))
 	if err != nil {
 		return domain.Task{}, translateError(err, "task")
 	}
@@ -255,7 +272,7 @@ func (r *taskPostgres) Update(ctx context.Context, id uuid.UUID, in UpdateTaskIn
 func (r *taskPostgres) Delete(ctx context.Context, id uuid.UUID) error {
 	const q = `DELETE FROM tasks WHERE id = $1`
 
-	tag, err := r.pool.Exec(ctx, q, id)
+	tag, err := r.runner.Exec(ctx, q, id)
 	if err != nil {
 		return translateError(err, "task")
 	}
