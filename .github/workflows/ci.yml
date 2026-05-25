@@ -1,0 +1,114 @@
+name: ci
+
+# Triggers: any push or PR. We deliberately don't restrict by path
+# because a `go.mod` change can affect everything, and a tooling
+# change can affect everything. Better to over-trigger than to miss
+# a regression.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs for the same PR when a new commit lands.
+# This saves CI minutes without losing safety: nobody cares whether
+# the older commit's tests pass once a newer commit exists.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Static analysis: vet + staticcheck ───────────────────────────
+  # Fast, no Docker, no DB. Fails the whole pipeline if either lint
+  # surfaces an issue. We deliberately do NOT run gofmt/goimports as
+  # gates because they're better as pre-commit hooks; the CI version
+  # would just fail on whitespace, which is bad signal-to-noise.
+  lint:
+    name: vet + staticcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          # Cache deps across runs. The cache key is derived from
+          # go.sum, so it invalidates correctly when deps change.
+          cache: true
+      - name: go vet
+        run: go vet ./...
+      - name: staticcheck
+        # staticcheck is the de facto Go community linter — stricter
+        # than vet, much less noisy than the alternatives. Run via
+        # `go run` so we get a pinned version without separate setup.
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@2024.1.1
+          staticcheck ./...
+
+  # ── Unit tests: fast, no DB ──────────────────────────────────────
+  # The default test build (no integration tag) — fakes only. Should
+  # finish in seconds. Failure here gates everything else.
+  test-unit:
+    name: unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go test ./...
+        run: go test -race -count=1 ./...
+        # -race enables the race detector. Slower (~2x), catches
+        # data races at test time instead of in production. The
+        # cost is well worth paying in CI.
+        # -count=1 disables the test cache so a result here is
+        # genuinely "the tests passed THIS time" not "the cached
+        # result said they did".
+
+  # ── Integration tests: real Postgres via testcontainers ──────────
+  # Slower (minutes including the container startup). Runs in
+  # parallel with test-unit so the wall-clock isn't sequential.
+  test-integration:
+    name: integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      # GitHub Actions runners have Docker pre-installed; that's
+      # what testcontainers-go uses. No setup step needed.
+      - name: integration tests
+        run: go test -tags=integration -count=1 ./...
+        # We deliberately do NOT use -race in integration tests.
+        # The container startup overhead + race-instrumented binary
+        # makes runs take much longer; the unit tests already
+        # caught the races. Belt: yes; suspenders: not here.
+
+  # ── Docker build sanity check ────────────────────────────────────
+  # Builds the multi-stage Dockerfile, but does NOT push anywhere.
+  # The point is purely to verify the build still works on every
+  # change — a broken Dockerfile is the kind of thing that surfaces
+  # only at deploy time otherwise, which is far too late.
+  docker-build:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # buildx is the modern Docker build engine: BuildKit features,
+      # better caching, smaller layers. The official setup-buildx
+      # action handles it.
+      - uses: docker/setup-buildx-action@v3
+      - name: build image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: gotask:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # cache-from/to with type=gha uses GitHub's Actions cache
+          # as the Docker layer cache. Subsequent runs reuse layers
+          # whose inputs haven't changed — typically 80%+ cache
+          # hit rate, dropping build time from minutes to seconds.

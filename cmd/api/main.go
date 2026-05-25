@@ -22,6 +22,7 @@ import (
 	"gotask/internal/config"
 	"gotask/internal/database"
 	"gotask/internal/keycloakadmin"
+	"gotask/internal/metrics"
 	"gotask/internal/middleware"
 	"gotask/internal/repository"
 	"gotask/internal/server"
@@ -159,6 +160,10 @@ func main() {
 	// made explicit and bounded: if Keycloak admin is unreachable, the
 	// app continues to function, just without enriched audit responses.
 	var userLookup keycloakadmin.Lookup
+	// adminClient is the concrete Client if we built one (used for its
+	// cache-cleanup worker). Nil when running with NoopLookup, in
+	// which case there is no cache to clean.
+	var adminClient *keycloakadmin.Client
 	if cfg.KeycloakAdminClientID != "" && cfg.KeycloakAdminClientSecret != "" {
 		client, lerr := keycloakadmin.NewClient(keycloakadmin.Config{
 			Issuer:       cfg.OIDCIssuer,
@@ -171,6 +176,7 @@ func main() {
 			log.Error("keycloak admin lookup disabled", "error", lerr)
 			userLookup = keycloakadmin.NoopLookup{}
 		} else {
+			adminClient = client
 			userLookup = client
 			log.Info("keycloak admin lookup ready",
 				"admin_base_url", cfg.KeycloakAdminBaseURL,
@@ -273,10 +279,26 @@ func main() {
 	// overkill for this many goroutines, but using it here keeps the
 	// pattern in front of us — future workers slot in as additional
 	// g.Go calls without restructuring.
+	// Phase 9: register Prometheus collectors before serving /metrics.
+	// Done exactly once at startup. The metrics package's MustRegister
+	// would panic on a duplicate Name, which is the right behaviour —
+	// it would mean a Phase 10+ change added a clashing metric and we
+	// want to fail fast.
+	metrics.Register()
+
 	g, gctx := errgroup.WithContext(rootCtx)
 	g.Go(func() error {
 		return drainer.Run(gctx)
 	})
+
+	// Phase 9 backlog item 5 resolved: start the keycloakadmin cache
+	// cleanup worker as a peer of the drainer. Only when we have a
+	// real Client — NoopLookup has no cache to clean.
+	if adminClient != nil {
+		g.Go(func() error {
+			return adminClient.Run(gctx, log)
+		})
+	}
 
 	// Start the HTTP server. We do NOT add it as g.Go because Go's
 	// http.Server has a different shutdown protocol (Shutdown(ctx)

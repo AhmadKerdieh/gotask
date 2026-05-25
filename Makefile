@@ -118,3 +118,37 @@ migrate-create: ## Scaffold a new migration (name=...)
 migrate-force: ## Clear a dirty migration state (version=N) — recovery only
 	@test -n "$(version)" || (echo "usage: make migrate-force version=N"; exit 1)
 	migrate -path $(MIGRATIONS_DIR) -database "$(DATABASE_URL)" force $(version)
+
+# ── Phase 10: testing, Docker, CI ───────────────────────────────────
+#
+# Integration tests require Docker (testcontainers-go spins up real
+# Postgres). They live behind the `integration` build tag so they
+# don't run with the normal `make test`. Use `make integration-test`
+# explicitly when you want them.
+#
+# The Docker build is the multi-stage production-grade image; the
+# `make ci` target runs every check CI runs, locally, in order.
+
+integration-test: ## Run integration tests against real Postgres (requires Docker)
+	go test -tags=integration -count=1 ./...
+
+docker-build: ## Build the production Docker image (multi-stage; ~20MB final)
+	docker build -t gotask:dev .
+
+docker-run: ## Run the built image (expects .env in the project root)
+	docker run --rm -p 8080:8080 --env-file .env gotask:dev
+
+# `make ci` mirrors the GitHub Actions pipeline so you can run the
+# same checks locally before pushing. Failing here means CI will fail
+# too; passing here means the change is likely (not certainly) green.
+ci: ## Run the same checks CI runs, in order
+	go vet ./...
+	go test -race -count=1 ./...
+	go test -tags=integration -count=1 ./...
+	docker build -t gotask:ci .
+
+# staticcheck is the de facto Go linter. We don't bundle it as a hard
+# `make ci` step because it requires a separate install; instead this
+# is the convenience target a developer can run before pushing.
+staticcheck: ## Run the staticcheck linter (install first with: go install honnef.co/go/tools/cmd/staticcheck@latest)
+	staticcheck ./...

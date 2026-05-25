@@ -7,14 +7,17 @@ package server
 import (
 	"log/slog"
 	"net/http"
+	netpprof "net/http/pprof"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"gotask/internal/audit"
 	"gotask/internal/config"
 	"gotask/internal/database"
 	"gotask/internal/handler"
 	"gotask/internal/keycloakadmin"
+	"gotask/internal/metrics"
 	"gotask/internal/middleware"
 	"gotask/internal/service"
 	"gotask/internal/validator"
@@ -85,6 +88,13 @@ func NewRouter(d Deps) http.Handler {
 
 	// 5. Timeout — sets deadline on r.Context(). Handlers must observe it.
 	r.Use(middleware.Timeout(d.Config.RequestTimeout))
+
+	// 6. Metrics — must be AFTER routing-aware middleware so the
+	//    route pattern is resolvable for the label. Inside the
+	//    AccessLog wrapper so a metric is always recorded even on
+	//    handler panic (the deferred panic recovery and our deferred
+	//    metric Observe both fire on unwind).
+	r.Use(middleware.Metrics)
 
 	// Chi's default 404 / 405 are plain text. Override to keep the envelope.
 	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
@@ -180,5 +190,58 @@ func NewRouter(d Deps) http.Handler {
 	// keep full control over what does and doesn't reach the FileServer.
 	r.Get("/", h.Index)
 
+	// ── Observability endpoints (Phase 9) ────────────────────────────
+	// /metrics serves Prometheus exposition format. Public by design —
+	// metrics are operational telemetry, not user data. In production
+	// you'd put a network-level ACL in front (e.g. only the Prom
+	// scraper's pod IP can reach this port); the app doesn't try to
+	// authenticate this endpoint because the scraper has no user
+	// identity to present.
+	r.Handle("/metrics", promhttp.HandlerFor(metrics.Registry, promhttp.HandlerOpts{
+		// Registry-specific handler (vs. promhttp.Handler() which uses
+		// the global registry). We use our own registry so /metrics
+		// shows exactly what we registered — no library leakage.
+	}))
+
+	// pprof endpoints gated by config. The net/http/pprof import has
+	// the side effect of registering on http.DefaultServeMux, which we
+	// don't use; we attach the handlers explicitly here. The gate is
+	// what makes it safe to enable in production behind a network ACL
+	// when an incident calls for profiling.
+	if d.Config.PProfEnabled {
+		d.Logger.Info("pprof endpoints enabled at /debug/pprof/")
+		r.Mount("/debug/pprof", pprofRouter())
+	}
+
+	return r
+}
+
+// pprofRouter mounts the standard net/http/pprof handlers at the
+// expected paths. We attach them explicitly rather than relying on the
+// side-effect import that registers them on http.DefaultServeMux —
+// chi has its own router and we serve nothing from DefaultServeMux.
+//
+// All endpoints listed here are documented at:
+//   https://pkg.go.dev/net/http/pprof
+//
+// In an incident, the standard go-tool flow is:
+//   go tool pprof http://localhost:8080/debug/pprof/heap
+//   go tool pprof http://localhost:8080/debug/pprof/profile?seconds=30
+//   go tool pprof http://localhost:8080/debug/pprof/goroutine
+func pprofRouter() http.Handler {
+	r := chi.NewRouter()
+	r.Get("/", netpprof.Index)
+	r.Get("/cmdline", netpprof.Cmdline)
+	r.Get("/profile", netpprof.Profile)
+	r.Post("/symbol", netpprof.Symbol)
+	r.Get("/symbol", netpprof.Symbol)
+	r.Get("/trace", netpprof.Trace)
+	// The named profiles are served by netpprof.Handler(name).ServeHTTP.
+	// The default profiles (allocs, block, goroutine, heap, mutex,
+	// threadcreate) all flow through this.
+	r.Get("/{name}", func(w http.ResponseWriter, req *http.Request) {
+		name := chi.URLParam(req, "name")
+		netpprof.Handler(name).ServeHTTP(w, req)
+	})
 	return r
 }

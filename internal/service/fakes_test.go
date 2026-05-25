@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/google/uuid"
@@ -73,9 +74,9 @@ func (f *fakeTaskRepo) GetByID(ctx context.Context, id uuid.UUID) (domain.Task, 
 	defer f.mu.Unlock()
 	t, ok := f.items[id]
 	if !ok {
-		// Return an error whose message contains "not found" so the
-		// service's mapRepoError translates it to ErrNotFound, exactly
-		// as the real repository's apperror would.
+		// Return repoNotFound, which wraps repository.ErrNotFound —
+		// matched by the service's mapRepoError via errors.Is, exactly
+		// as the real repository's repoError dual-tagging does.
 		return domain.Task{}, repoNotFound("task")
 	}
 	return t, nil
@@ -146,9 +147,9 @@ func (f *fakeProjectRepo) Create(ctx context.Context, in domain.NewProjectInput)
 	defer f.mu.Unlock()
 	if _, dup := f.keys[in.Key]; dup {
 		// Mirror the real repository: a duplicate unique key surfaces
-		// as a conflict. The message contains "already exists" so
-		// mapRepoError translates it to service.ErrConflict.
-		return domain.Project{}, repoConflict("project key already exists")
+		// as a conflict. repoConflict wraps repository.ErrConflict —
+		// matched by mapRepoError via errors.Is.
+		return domain.Project{}, repoConflict("project key")
 	}
 	p := domain.Project{
 		ID:          uuid.New(),
@@ -192,14 +193,25 @@ func (f *fakeProjectRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// repoNotFound / repoConflict produce errors whose messages match the
-// stable substrings the real repository guarantees ("not found",
-// "already exists"), so the service's mapRepoError behaves identically
-// against fakes and against Postgres. This is what keeps the unit tests
-// honest: they exercise the same translation logic production uses.
-type stringErr string
+// repoNotFound / repoConflict produce errors that wrap the repository
+// layer's TYPED sentinels (Phase 9). They satisfy errors.Is(err,
+// repository.ErrNotFound) and errors.Is(err, repository.ErrConflict)
+// respectively — the same contract the real PostgresAuditor's
+// translateError produces via repoError dual-tagging.
+//
+// Before Phase 9 these returned strings whose messages contained "not
+// found" / "already exists", which the service's mapRepoError matched
+// with strings.Contains. When mapRepoError moved to errors.Is, this
+// file moved with it — because the test fakes implement the same
+// contract as the real repository, and that contract is now typed.
+//
+// The fmt.Errorf %w wrap is what makes errors.Is walk the chain and
+// find the sentinel; equivalent to repoError.Is() in the real impl,
+// just expressed via stdlib %w rather than a custom Is method.
+func repoNotFound(resource string) error {
+	return fmt.Errorf("%s not found: %w", resource, repository.ErrNotFound)
+}
 
-func (e stringErr) Error() string { return string(e) }
-
-func repoNotFound(resource string) error { return stringErr(resource + " not found") }
-func repoConflict(msg string) error      { return stringErr(msg + " (already exists)") }
+func repoConflict(msg string) error {
+	return fmt.Errorf("%s already exists: %w", msg, repository.ErrConflict)
+}

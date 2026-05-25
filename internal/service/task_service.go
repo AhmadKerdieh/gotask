@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/google/uuid"
@@ -11,6 +12,7 @@ import (
 	"gotask/internal/authz"
 	"gotask/internal/database"
 	"gotask/internal/domain"
+	"gotask/internal/reqctx"
 	"gotask/internal/repository"
 )
 
@@ -209,6 +211,15 @@ func (s *TaskService) audit(ctx context.Context, runner database.Queryer, e audi
 	if s.auditor == nil {
 		return nil
 	}
+	// Phase 9: stamp request_id from context onto the event. The audit
+	// row stores it; the drainer's logs include it; you can grep an
+	// incident's request_id and see both the HTTP log line AND the
+	// drain log line for the same operation. This is the trace
+	// continuity across the goroutine boundary that distinguishes
+	// "audit recorded" from "audit you can correlate to its cause".
+	if e.RequestID == "" {
+		e.RequestID = reqctx.RequestIDFromContext(ctx)
+	}
 	return s.auditor.Record(ctx, runner, e)
 }
 
@@ -343,6 +354,9 @@ func (s *TaskService) recordOutboxOnly(ctx context.Context, e audit.Event) error
 	if s.auditor == nil {
 		return nil
 	}
+	if e.RequestID == "" {
+		e.RequestID = reqctx.RequestIDFromContext(ctx)
+	}
 	if s.db == nil {
 		return s.auditor.Record(ctx, nil, e)
 	}
@@ -408,47 +422,42 @@ func (s *TaskService) Delete(ctx context.Context, claims authz.Claims, id uuid.U
 }
 
 // isRepoNotFound reports whether a repository error represents "no such
-// row". The repository layer translates pgx.ErrNoRows into an
-// apperror.NotFound; rather than import apperror here (the service must
-// not know about HTTP), we match on the error string boundary. This is a
-// deliberate, documented seam — see mapRepoError for the fuller note.
+// row". Phase 9 replaced Phase 4-8's string matching with a typed
+// errors.Is check — the repository now exports repository.ErrNotFound
+// as a sentinel, and translateError wraps the apperror in a repoError
+// that satisfies both errors.Is(repository.ErrNotFound) AND
+// errors.As(&apperror.Error{}). Each layer matches on its own
+// vocabulary; this layer's is repository.ErrNotFound.
 func isRepoNotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-	// apperror.Error.Error() for a not-found is of the form
-	// "not_found: <resource> not found". We avoid importing apperror by
-	// checking the stable substring the repository guarantees.
-	return strings.Contains(err.Error(), "not found")
+	return errors.Is(err, repository.ErrNotFound)
 }
 
 // mapRepoError converts a repository error into the service error
 // vocabulary so callers (and tests) can branch with errors.Is on
-// service.ErrNotFound / ErrConflict without knowing anything about
-// apperror or pgx.
+// service.ErrNotFound / ErrConflict.
 //
-// Why string-matching instead of importing apperror: the service must
-// not depend on the HTTP error package (that would couple business logic
-// to transport). The repository's apperror messages are a stable,
-// documented contract for exactly this translation. If this coupling
-// ever feels too loose, the cleaner fix is a small typed error in the
-// repository package that the service imports — noted as a Phase 9
-// hardening candidate, intentionally not done now to keep the layer
-// boundary obvious.
+// Phase 9 cleanup: this used to do string matching on apperror
+// messages, with a comment apologising for the coupling and a note
+// flagging it as a Phase 9 candidate. That fix landed: the repository
+// now exports typed sentinels, this function uses errors.Is, and the
+// service no longer needs to know anything about the apperror format.
+// The "intentionally not done now" backlog item from Phase 4 is closed.
 func mapRepoError(err error) error {
 	if err == nil {
 		return nil
 	}
 	switch {
-	case isRepoNotFound(err):
+	case errors.Is(err, repository.ErrNotFound):
 		return ErrNotFound
-	case strings.Contains(err.Error(), "already exists"),
-		strings.Contains(err.Error(), "conflict"):
+	case errors.Is(err, repository.ErrConflict):
 		return ErrConflict
 	default:
 		// Pass through unknown errors unwrapped. Context
 		// cancellation/deadline must stay recognisable so the HTTP
-		// timeout path still yields 504, not 500.
+		// timeout path still yields 504, not 500. Constraint
+		// violations (repository.ErrConstraintViolation) also pass
+		// through unwrapped — the repoError's Unwrap returns the
+		// apperror.BadRequest cause, which the handler maps to 400.
 		return err
 	}
 }

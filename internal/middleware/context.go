@@ -20,6 +20,7 @@ import (
 	"log/slog"
 
 	"gotask/internal/authz"
+	"gotask/internal/reqctx"
 )
 
 // ctxKey is a private type used to namespace context keys. The Go community
@@ -29,25 +30,25 @@ import (
 type ctxKey int
 
 const (
-	requestIDKey ctxKey = iota
+	_             ctxKey = iota // formerly requestIDKey; moved to internal/reqctx
 	loggerKey
 	userSubjectKey
 	userClaimsKey
 )
 
 // WithRequestID returns a derived context carrying the request ID.
+// Delegates to reqctx so the value is readable from layers that
+// cannot import middleware (service, audit). The wrapper is kept for
+// source compatibility with existing call sites in this package.
 func WithRequestID(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, requestIDKey, id)
+	return reqctx.WithRequestID(ctx, id)
 }
 
 // RequestIDFromContext extracts the request ID, or "" if none is present.
 // Returning "" instead of a bool makes call sites cleaner — an empty ID is
 // rendered as an empty field in structured logs, which is acceptable.
 func RequestIDFromContext(ctx context.Context) string {
-	if v, ok := ctx.Value(requestIDKey).(string); ok {
-		return v
-	}
-	return ""
+	return reqctx.RequestIDFromContext(ctx)
 }
 
 // WithLogger returns a derived context carrying a request-scoped logger.

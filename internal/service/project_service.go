@@ -9,6 +9,7 @@ import (
 
 	"gotask/internal/audit"
 	"gotask/internal/domain"
+	"gotask/internal/reqctx"
 	"gotask/internal/repository"
 )
 
@@ -70,11 +71,12 @@ func (s *ProjectService) Create(ctx context.Context, in CreateProjectInput) (dom
 		}
 		if s.auditor != nil {
 			if err := s.auditor.Record(ctx, nil, audit.Event{
-				Actor:   in.OwnerID,
-				Action:  audit.ActionProjectCreated,
-				Target:  audit.Target{Kind: "project", ID: created.ID},
-				Outcome: audit.OutcomeSuccess,
-				Detail:  map[string]any{"key": created.Key, "name": created.Name},
+				Actor:     in.OwnerID,
+				Action:    audit.ActionProjectCreated,
+				Target:    audit.Target{Kind: "project", ID: created.ID},
+				Outcome:   audit.OutcomeSuccess,
+				Detail:    map[string]any{"key": created.Key, "name": created.Name},
+				RequestID: reqctx.RequestIDFromContext(ctx),
 			}); err != nil {
 				return domain.Project{}, err
 			}
@@ -100,11 +102,12 @@ func (s *ProjectService) Create(ctx context.Context, in CreateProjectInput) (dom
 		}
 		if s.auditor != nil {
 			if err := s.auditor.Record(ctx, tx, audit.Event{
-				Actor:   in.OwnerID,
-				Action:  audit.ActionProjectCreated,
-				Target:  audit.Target{Kind: "project", ID: c.ID},
-				Outcome: audit.OutcomeSuccess,
-				Detail:  map[string]any{"key": c.Key, "name": c.Name},
+				Actor:     in.OwnerID,
+				Action:    audit.ActionProjectCreated,
+				Target:    audit.Target{Kind: "project", ID: c.ID},
+				Outcome:   audit.OutcomeSuccess,
+				Detail:    map[string]any{"key": c.Key, "name": c.Name},
+				RequestID: reqctx.RequestIDFromContext(ctx),
 			}); err != nil {
 				return err
 			}
