@@ -112,6 +112,13 @@ type Config struct {
 	// 2 ("graceful-shutdown timeout < REQUEST_TIMEOUT") — Phase 8
 	// resolves it.
 	ShutdownTimeout time.Duration `mapstructure:"SHUTDOWN_TIMEOUT"`
+
+	// PProfEnabled gates whether /debug/pprof/* handlers are mounted.
+	// Off by default so production deployments don't expose them by
+	// accident; flip to true via env when an incident calls for
+	// profiling. Zero runtime cost when false — the handler is just
+	// not registered.
+	PProfEnabled bool `mapstructure:"PPROF_ENABLED"`
 }
 
 // Load reads the .env file (if present) and overlays environment variables,
@@ -138,6 +145,23 @@ func Load() (*Config, error) {
 	v.SetDefault("AUDIT_DRAIN_INTERVAL", "1s")
 	v.SetDefault("AUDIT_DRAIN_BATCH_SIZE", 100)
 	v.SetDefault("SHUTDOWN_TIMEOUT", "30s")
+	v.SetDefault("PPROF_ENABLED", false)
+
+	// Bind env vars that have no SetDefault. Viper's AutomaticEnv only
+	// surfaces env vars for keys it has already seen via SetDefault, a
+	// loaded config file, or an explicit BindEnv. When the .env file is
+	// PRESENT (the make-run path) Viper learns these keys from the file
+	// and AutomaticEnv works transparently — but in a containerised
+	// deploy where there's no .env on disk and DATABASE_URL is supplied
+	// via `-e`, Viper would silently fail to bind it. These BindEnv
+	// calls close that gap. The keys here are exactly those that:
+	//   (a) have no SetDefault (because they're required-with-no-default
+	//       or are optional-without-fallback), AND
+	//   (b) callers might legitimately set via env in a no-.env-file
+	//       deployment.
+	_ = v.BindEnv("DATABASE_URL")
+	_ = v.BindEnv("KEYCLOAK_ADMIN_CLIENT_ID")
+	_ = v.BindEnv("KEYCLOAK_ADMIN_CLIENT_SECRET")
 
 	// .env file lookup.
 	v.SetConfigName(".env")

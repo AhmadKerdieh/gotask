@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"gotask/internal/database"
+	"gotask/internal/metrics"
 )
 
 // PostgresAuditor satisfies both Recorder and Reader.
@@ -69,7 +70,17 @@ func (a *PostgresAuditor) Record(ctx context.Context, runner database.Queryer, e
 		detail,
 		nullableString(e.RequestID),
 	)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Phase 9: bump the audit-events counter. Labels are bounded
+	// (4 actions × 2 outcomes = 8 series) so this is safe. We only
+	// bump on success — a failed Record is a rollback-causing event
+	// the operator wants to see as a 5xx in the HTTP metrics, not
+	// as a phantom audit row in the counter.
+	metrics.AuditEventsTotal.WithLabelValues(e.Action, e.Outcome).Inc()
+	return nil
 }
 
 const auditLogColumns = `id, occurred_at, actor_sub, action, target_kind, target_id, outcome, detail, request_id`

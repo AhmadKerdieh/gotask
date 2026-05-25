@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -250,6 +251,78 @@ func (c *Client) cachePut(sub uuid.UUID, info UserInfo) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cache[sub] = cachedUser{info: info, expiry: time.Now().Add(c.cfg.CacheTTL)}
+}
+
+// Run is the cache cleanup goroutine — Phase 9 backlog item 5
+// resolved. The Client's cacheGet checks v.expiry on read, so EXPIRED
+// entries return false (cache miss); but the map entries themselves
+// are never deleted, so memory grows monotonically with unique sub
+// lookups. Over months in production with thousands of users, this
+// is a slow leak. Run periodically evicts expired entries.
+//
+// ── The four questions of every goroutine ────────────────────────────
+//
+//   1. WHO STARTS IT — main.go, conditionally (only if the real
+//      Client was constructed; NoopLookup has no Run method).
+//   2. WHO STOPS IT — context cancellation. Same root context as the
+//      drainer, propagated via errgroup.
+//   3. WHAT HAPPENS IN-FLIGHT — eviction is fast (a single map scan
+//      under the cache mutex); cancellation between iterations is
+//      always clean. No need for the iterCtx pattern the drainer uses
+//      because no transaction is involved.
+//   4. WHAT HAPPENS ON PANIC — wrapped in deferred recover. The work
+//      is non-critical (memory hygiene); a panic logs and exits, the
+//      errgroup observes the goroutine return.
+//
+// This is the second long-lived goroutine in the codebase. Contrast
+// with audit/drainer.go: same discipline applied to much simpler
+// work. The shape is identical because the SHAPE is the point —
+// every long-lived goroutine deserves these four answers, regardless
+// of complexity.
+func (c *Client) Run(ctx context.Context, log *slog.Logger) error {
+	defer func() {
+		if p := recover(); p != nil {
+			log.Error("keycloakadmin cache cleanup panic", "panic", p)
+		}
+	}()
+
+	// One eviction per CacheTTL is the right cadence: any entry not
+	// touched for that long is definitely expired. More frequent
+	// would waste cycles; less frequent would let stale entries
+	// linger pointlessly.
+	ticker := time.NewTicker(c.cfg.CacheTTL)
+	defer ticker.Stop()
+
+	log.Info("keycloakadmin cache cleanup started", "interval", c.cfg.CacheTTL)
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("keycloakadmin cache cleanup stopping", "reason", ctx.Err())
+			return nil
+		case <-ticker.C:
+			evicted := c.evictExpired()
+			if evicted > 0 {
+				log.Debug("keycloakadmin cache: evicted expired entries", "count", evicted)
+			}
+		}
+	}
+}
+
+// evictExpired removes cache entries whose expiry has passed. Returns
+// the number of entries evicted (for logging / future metric).
+func (c *Client) evictExpired() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	evicted := 0
+	for sub, v := range c.cache {
+		if now.After(v.expiry) {
+			delete(c.cache, sub)
+			evicted++
+		}
+	}
+	return evicted
 }
 
 // NoopLookup is the safe fallback: it returns an empty UserInfo for

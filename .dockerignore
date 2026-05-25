@@ -1,0 +1,43 @@
+# Anything in the build context becomes a layer fingerprint input.
+# Excluding noise here makes `docker build` faster and prevents
+# secrets/local-only files from accidentally ending up in images.
+
+# Git metadata: large, not used by the build.
+.git
+.gitignore
+.github
+
+# Local environment — must NEVER ship in an image.
+.env
+.env.*
+!.env.example
+
+# Editor and OS scratch.
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+
+# Build artefacts and downloaded dependencies — rebuilt inside the
+# image, not copied in.
+bin/
+dist/
+vendor/
+
+# Test infrastructure not needed at runtime.
+test/
+*_test.go
+
+# Documentation source not needed in the image.
+*.md
+docs/
+
+# Container files we don't want recursively copied into the build.
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Anything else generated locally.
+coverage.out
+*.log

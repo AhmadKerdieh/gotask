@@ -3,7 +3,6 @@ package audit
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"gotask/internal/database"
+	"gotask/internal/metrics"
 )
 
 // Drainer is the background worker that moves rows from audit_outbox
@@ -159,6 +159,14 @@ func (d *Drainer) Run(ctx context.Context) error {
 // reason to stop draining forever. Persistent failures will be visible
 // as a growing audit_outbox table (a metric Phase 9 will surface).
 func (d *Drainer) drainOnce(ctx context.Context) {
+	// Phase 9 observability: time the iteration and record the
+	// outcome. This gives operators a histogram of how long drainer
+	// iterations take — a useful tuning signal for batch size.
+	start := time.Now()
+	defer func() {
+		metrics.DrainerIterationDuration.Observe(time.Since(start).Seconds())
+	}()
+
 	// We deliberately use a DIFFERENT context for the database work
 	// than the outer ctx, so a cancellation during shutdown does not
 	// abort an in-flight iteration mid-commit (which could leave
@@ -169,6 +177,26 @@ func (d *Drainer) drainOnce(ctx context.Context) {
 	// hold up shutdown indefinitely.
 	iterCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// Phase 9: update the outbox-depth gauge with the count BEFORE
+	// our claim. This is the operator-alarming metric: if it grows
+	// sustainedly, the drainer can't keep up. We do this with a
+	// separate (cheap) COUNT query rather than reading it from the
+	// claim's result count, because the claim is bounded by
+	// d.batch and would understate true depth.
+	//
+	// This query runs OUTSIDE the iteration tx so it doesn't hold
+	// locks; it's read-only and a slightly stale value is fine —
+	// the next iteration corrects it.
+	var pending int
+	if err := d.pool.QueryRow(iterCtx,
+		`SELECT count(*) FROM audit_outbox WHERE claimed_at IS NULL`,
+	).Scan(&pending); err == nil {
+		metrics.AuditOutboxPending.Set(float64(pending))
+	}
+	// We deliberately ignore the count's error: a transient failure
+	// here is a stale-metric issue, not a correctness one, and we
+	// don't want it to abort the actual drain that follows.
 
 	tx, err := d.pool.Begin(iterCtx)
 	if err != nil {
@@ -248,6 +276,13 @@ func (d *Drainer) drainOnce(ctx context.Context) {
 
 	const deleteQ = `DELETE FROM audit_outbox WHERE id = $1`
 
+	// Collect the request_ids from this batch so we can log them
+	// after a successful commit. This is the trace-continuity payoff
+	// of the Phase 7 schema column finally being populated: an
+	// incident's request_id appears in BOTH the HTTP access log AND
+	// this drain log line, so a log search ties them together across
+	// the goroutine boundary.
+	requestIDs := make([]string, 0, len(batch))
 	drained := 0
 	for _, c := range batch {
 		_, err := tx.Exec(iterCtx, insertQ,
@@ -273,6 +308,9 @@ func (d *Drainer) drainOnce(ctx context.Context) {
 			return
 		}
 		drained++
+		if c.RequestID != nil && *c.RequestID != "" {
+			requestIDs = append(requestIDs, *c.RequestID)
+		}
 	}
 
 	if err := tx.Commit(iterCtx); err != nil {
@@ -283,21 +321,27 @@ func (d *Drainer) drainOnce(ctx context.Context) {
 		return
 	}
 
-	d.log.Debug("drain: batch drained", "count", drained)
+	// Bump the rows-processed counter by exactly the count we
+	// committed. With prometheus, counters are monotonic — we never
+	// decrement, only Add (or Inc, which is Add(1)).
+	metrics.DrainerRowsProcessed.Add(float64(drained))
+
+	// Log at Info (not Debug) when we drain a non-trivial batch,
+	// including the request_ids. This is what makes the trace loop
+	// closeable: grep an incident's request_id and you'll find both
+	// the HTTP access log line AND this drain line for the same
+	// request, even though they live in different goroutines and
+	// possibly seconds apart.
+	d.log.Info("drain: batch drained",
+		"count", drained,
+		"request_ids", requestIDs,
+	)
 }
 
 // Assert the type at compile time so an accidental signature drift on
 // pgconn doesn't break callers silently. (Tag is unused locally; this
 // is documentation by way of compilation.)
 var _ pgconn.CommandTag = pgconn.CommandTag{}
-
-// drainerError is reserved for future typed errors the drainer might
-// expose to callers. Today the drainer logs and swallows; if/when an
-// outer caller wants to react to drainer health, this stub is where
-// the typed surface lands.
-type drainerError struct{ msg string }
-
-func (e *drainerError) Error() string { return fmt.Sprintf("drainer: %s", e.msg) }
 
 // Ensure database.Queryer is satisfied by *pgxpool.Pool — drainOnce
 // uses tx directly, but the assertion keeps the file honest about its

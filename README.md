@@ -593,6 +593,285 @@ The Phase 5 backlog is now mostly paid down. Remaining tracked items:
    means the drainer is falling behind. Expose this as a metric in
    Phase 9 (observability) so operators can alarm on it.
 
+## Phase 9 — Observability & hardening
+
+The production-polish phase. Phase 8 made the system *correct* under
+concurrency; Phase 9 makes it **operable** — answerable to operators
+who weren't around when it was built.
+
+You chose **Path C** (Prometheus-native) in the design questions. The
+`/metrics` endpoint shows real, human-readable output on first curl —
+no Collector, no backend, no SigNoz stack to bring up. Operationally
+smaller than the OpenTelemetry path; pedagogically the lessons (four
+golden signals, cardinality discipline, histogram vs counter vs gauge)
+are identical regardless of which protocol you'd choose long-term.
+
+- **Prometheus metrics on `/metrics`.** New `internal/metrics` package
+  declares all collectors in one place — the discipline of
+  centralising naming, label sets, and cardinality decisions. Includes
+  the four golden signals (latency, traffic, errors, saturation), the
+  audit-events counter, the **outbox-pending gauge** (the alerting
+  metric Phase 8 named), drainer iteration histogram, DB pool stats,
+  and Go runtime metrics for free via the client library.
+- **HTTP metrics middleware.** Uses `chi.RouteContext().RoutePattern()`
+  for low-cardinality route labels — `/api/v1/tasks/{id}`, not
+  `/api/v1/tasks/abc-123`. The single thing that distinguishes
+  "production-ready" from "kills Prometheus in a week".
+- **Request-id propagation through the outbox.** The `request_id`
+  column added in Phase 7 finally gets populated. Service stamps it
+  onto `audit.Event` via the new `internal/reqctx` package
+  (deliberately small, no HTTP, importable from the service without
+  breaking layering). The drainer logs include the request_ids of
+  drained rows — grep an incident's request_id and you see both the
+  HTTP access log line AND the drain log line for the same
+  operation, even though they live in different goroutines.
+- **Typed errors at the repository↔service boundary.** The Phase 4-8
+  string-matching wart in `mapRepoError` is finally gone. Repository
+  exports `ErrNotFound`, `ErrConflict`, `ErrConstraintViolation`
+  sentinels; the service uses `errors.Is`. The `repoError` struct
+  carries both the sentinel (for the service) AND an apperror cause
+  (for the handler's `respondError`) — each layer matches on its own
+  vocabulary, no string parsing anywhere.
+- **Keycloakadmin cache cleanup worker.** Phase 8 backlog item 5
+  resolved. A small ticker-driven goroutine evicts expired cache
+  entries from `keycloakadmin.Client`. Started under the same errgroup
+  as the drainer. This is the second long-lived goroutine in the
+  codebase — same four-questions discipline, simpler work, deliberate
+  pedagogical contrast.
+- **`/debug/pprof/*` gated by `PPROF_ENABLED`.** Off by default; flip
+  to true when an incident needs profiling. Zero runtime cost when
+  disabled. Standard `go tool pprof` workflow when on.
+
+### What `/metrics` looks like
+
+```bash
+curl http://localhost:8080/metrics | head -50
+```
+
+You'll see, among ~50 distinct metrics:
+
+```
+# HELP http_requests_total Total HTTP requests. Labels are route (chi pattern), method, status class.
+# TYPE http_requests_total counter
+http_requests_total{method="GET",route="/api/v1/tasks",status="2xx"} 12
+http_requests_total{method="POST",route="/api/v1/tasks",status="2xx"} 5
+
+# HELP audit_outbox_pending Current number of unclaimed rows in audit_outbox. A growing value means the drainer is falling behind.
+# TYPE audit_outbox_pending gauge
+audit_outbox_pending 0
+
+# HELP audit_events_total Total audit events recorded, by action and outcome.
+# TYPE audit_events_total counter
+audit_events_total{action="task.created",outcome="success"} 5
+audit_events_total{action="task.deleted",outcome="denied"} 1
+```
+
+The format is human-readable on purpose — Prometheus's wire format is
+literally a text file, which is why curling it works.
+
+### New env vars
+
+```
+PPROF_ENABLED=false   # set to true to mount /debug/pprof/*
+```
+
+### Backlog after Phase 9
+
+Items 3, 5, and 6 from Phase 8 are now resolved. Remaining:
+
+1. **Integration tests with testcontainers-go** — still deferred. The
+   long-standing Phase 5 item; Phase 10 is where it lands.
+2. ~~Graceful-shutdown timeout hardcoded.~~ **Resolved in Phase 8.**
+3. ~~Service↔repository error coupling uses string matching.~~
+   **Resolved in Phase 9** via typed sentinels.
+4. **Option A: no local users table** (Phase 6 decision, permanent).
+   Not a defect; the trade-off remains explicit.
+5. ~~Token-cache cleanup worker.~~ **Resolved in Phase 9.**
+6. ~~Outbox observability.~~ **Resolved in Phase 9** via the
+   `audit_outbox_pending` gauge.
+
+Phase 10 closes the course: testing, Docker, CI.
+
+## Phase 10 — Integration tests, Docker, GitHub Actions
+
+The closing phase. After nine phases of building features, this one
+adds three things that turn "a project on my laptop" into "a project
+anyone can verify, build, and deploy":
+
+- **Integration tests with testcontainers-go.** The Phase 5 placeholder
+  is replaced with real integration tests against real Postgres. The
+  per-suite testcontainers fixture (chosen deliberately for speed)
+  starts one container, applies every migration, and shares the pool
+  across all tests in a package. Tests truncate between runs via a
+  cleanup hook. The result: ~10 integration tests across the
+  repository and audit packages, running in ~10 seconds total.
+
+- **A Dockerfile.** Multi-stage build: `golang:1.22-bookworm` builder
+  → `gcr.io/distroless/static-debian12:nonroot` runtime. Final image
+  ~20MB, no shell, no package manager, non-root user, fully static
+  binary. The build is fully reproducible; the runtime is hardened
+  by default.
+
+- **GitHub Actions CI.** Four jobs: `lint` (go vet + staticcheck),
+  `test-unit`, `test-integration`, and `docker-build`. PR merges
+  blocked unless all green. Concurrency-controlled so newer commits
+  cancel older runs. Cache-aware so subsequent runs reuse Go modules
+  and Docker layers.
+
+### What the integration tests verify
+
+The unit tests since Phase 4 verified business rules using fakes. The
+integration tests in this phase verify infrastructure the fakes were
+pretending to be:
+
+- Migrations apply cleanly to a fresh database in order
+  (`TestMigrationsApplied`).
+- Real SQL parses against real Postgres — column names, placeholders,
+  types (`TestTaskRepository_Create_RoundTrips`).
+- The Phase 9 dual-tagged `repoError` works on real `pgx.ErrNoRows`
+  and real unique-violation errors — both `errors.Is` (sentinel) and
+  `errors.As` (apperror) succeed on the same value
+  (`TestTaskRepository_GetByID_NotFound_DualTagged`,
+  `TestProjectRepository_Create_DuplicateKey_DualTagged`).
+- The Phase 8 `WithTx` helper commits on success
+  (`TestWithTx_CommitsOnSuccess`), rolls back on error
+  (`TestWithTx_RollsBackOnError`), and rolls back on panic
+  (`TestWithTx_RollsBackOnPanic`).
+- The audit Recorder writes to outbox including `request_id`
+  (`TestRecord_WritesToOutbox`).
+- The Drainer moves rows from outbox to audit_log with request_id
+  preserved (`TestDrainer_MovesOutboxRowsToAuditLog`).
+- The Drainer is idempotent under at-least-once delivery —
+  re-processing a row that's already in audit_log does not produce a
+  duplicate (`TestDrainer_IsIdempotent`).
+- The Recorder is transactionally atomic — when the caller's tx rolls
+  back, the audit row does not exist
+  (`TestRecorder_TransactionalAtomicity`).
+
+### Building and running
+
+```bash
+# Run unit tests (fast, no Docker):
+make test
+
+# Run integration tests (needs Docker):
+make integration-test
+
+# Run everything CI runs, locally:
+make ci
+
+# Build the production image:
+make docker-build
+
+# Run the image (needs .env in the project root):
+make docker-run
+```
+
+The Dockerfile is what you'd actually ship: multi-stage so the
+toolchain doesn't bloat the runtime, distroless so there's nothing to
+attack, non-root so a container escape doesn't grant root on the
+host, static binary so the runtime has no glibc-version risk.
+
+### Backlog after Phase 10
+
+| # | Item | Status |
+|---|------|--------|
+| 1 | Integration tests with testcontainers-go | **Resolved in Phase 10** |
+| 2 | Graceful-shutdown timeout < REQUEST_TIMEOUT | ~~Resolved in Phase 8~~ |
+| 3 | Service↔repository error coupling uses strings | ~~Resolved in Phase 9~~ |
+| 4 | Option A: no local users table | Permanent (Phase 6 decision) |
+| 5 | Token-cache cleanup worker | ~~Resolved in Phase 9~~ |
+| 6 | Outbox observability metric | ~~Resolved in Phase 9~~ |
+
+The backlog is empty of actionable items. Item 4 is the explicit,
+documented architectural trade-off from Phase 6 — by design, not a
+defect.
+
+## The finished system — a final tour
+
+After ten phases the repository is a coherent system worth touring as
+a whole. Here's the map:
+
+### Packages (twelve)
+
+```
+internal/apperror     HTTP error vocabulary with status code categories
+internal/audit        outbox-pattern audit log + drainer goroutine
+internal/authz        pure authorization predicates (no I/O, no HTTP)
+internal/config       Viper-backed config with validation
+internal/database     pool + WithTx helper (the Queryer abstraction)
+internal/domain       core types (Task, Project, Status) and inputs
+internal/handler      HTTP handlers + DTO conversion
+internal/keycloakadmin Keycloak Admin API client with TTL cache + cleanup worker
+internal/metrics      Prometheus collectors with cardinality discipline
+internal/middleware   HTTP middleware: RequestID, AccessLog, Recover, CORS, Timeout, Metrics, Auth
+internal/repository   storage interfaces + Postgres impls + typed errors
+internal/reqctx       cross-layer context keys (no HTTP, so service can import)
+internal/server       chi router + route registration
+internal/service      business rules; the one layer that knows everything
+internal/validator    request-body validation
+```
+
+Plus `pkg/logger` (slog setup), `pkg/response` (JSON envelope), `cmd/api` (main), `test/testutil` (testcontainers fixture).
+
+### Background goroutines (four)
+
+1. **The HTTP server** (`http.Server` in `main.go`) — runs in its own
+   goroutine, shuts down via `Shutdown(ctx)`.
+2. **The audit drainer** (`audit.Drainer.Run` in `cmd/api/main.go`) —
+   runs under `errgroup`, observes the root context, drains outbox
+   on a 1-second poll.
+3. **The keycloakadmin cache cleanup worker** (`keycloakadmin.Client.Run`)
+   — runs under the same errgroup, evicts expired cache entries every
+   5 minutes.
+4. **The signal handler** — converts SIGTERM/SIGINT into context
+   cancellation; the trigger for all three above.
+
+Each one has documented answers to the four questions: who starts it,
+who stops it, what happens to in-flight work at shutdown, what happens
+on panic. They're not just code; they're disciplined code.
+
+### The architectural properties — verified one last time
+
+```bash
+# Service has no HTTP knowledge
+grep -rn '"net/http"' internal/service/ --include='*.go' | grep -v '//\|test'   # empty
+
+# Service has no apperror knowledge
+grep -rn '"gotask/internal/apperror"' internal/service/ --include='*.go' | grep -v '//\|test'   # empty
+
+# Audit has no HTTP knowledge
+grep -rn '"net/http"' internal/audit/ --include='*.go' | grep -v '//\|test'     # empty
+
+# Authz is pure (no I/O)
+grep -rn '"net/http"\|"context"' internal/authz/authz.go | grep -v '//'         # empty
+
+# reqctx is pure (no HTTP, importable from service)
+grep -rn '"net/http"' internal/reqctx/ --include='*.go'                         # empty
+```
+
+Five invariants. All five hold. They held when the codebase was 500
+lines (Phase 1) and they hold now at several thousand. The discipline
+encoded in package boundaries is what made every phase additive — no
+Phase ever required undoing decisions from an earlier one.
+
+### The cumulative validation: a single command
+
+```bash
+make ci
+```
+
+Runs in order: `go vet ./...`, the unit tests with `-race`, the
+integration tests against real Postgres, the Docker build. If all
+four pass, the codebase is in the same state every other commit on
+main has been in.
+
+This is the discipline the course was building toward all along:
+**the system proves itself**. You don't have to trust the README; you
+don't have to remember to run any particular check. One command,
+exit code zero or non-zero. That's what a complete project looks
+like.
+
 ## Run it
 
 ```bash

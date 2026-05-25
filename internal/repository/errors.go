@@ -3,11 +3,42 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"gotask/internal/apperror"
+)
+
+// Repository-layer sentinel errors. These are the typed surface the
+// service uses with errors.Is(), replacing the Phase 4-8 string-matching
+// in service.mapRepoError. The full chain a service sees is:
+//
+//     errors.Is(err, repository.ErrNotFound) → true
+//     errors.As(err, &apperror.Error{...})   → true (still works)
+//
+// because translateError returns errors that wrap BOTH a repository
+// sentinel AND an apperror underneath. The handler's apperror-aware
+// respondError keeps working; the service gets clean typed checks.
+//
+// What goes here vs apperror: apperror is the HTTP-shaped error
+// vocabulary (status codes, response envelopes). These sentinels are
+// the BUSINESS-shaped outcomes ("the row wasn't there", "the unique
+// constraint was violated"). The repository now speaks both languages
+// fluently and the service only consumes the business one.
+var (
+	// ErrNotFound — the queried row does not exist.
+	ErrNotFound = errors.New("repository: not found")
+
+	// ErrConflict — a unique constraint or foreign-key constraint was
+	// violated. The service surfaces this as a 409 Conflict to clients.
+	ErrConflict = errors.New("repository: conflict")
+
+	// ErrConstraintViolation — a CHECK or NOT NULL constraint was hit.
+	// Typically indicates a defense-in-depth catch of something
+	// validation should have rejected earlier. Surfaces as 400.
+	ErrConstraintViolation = errors.New("repository: constraint violation")
 )
 
 // Postgres SQLSTATE codes we care about. The full list is in the Postgres
@@ -55,7 +86,14 @@ func translateError(err error, resource string) error {
 	// No rows is the canonical "not found". pgx returns a sentinel we can
 	// match with errors.Is.
 	if errors.Is(err, pgx.ErrNoRows) {
-		return apperror.NotFound(resource)
+		// Wrap both the sentinel AND the apperror so both `errors.Is`
+		// paths work: the service uses repository.ErrNotFound; the
+		// handler's respondError uses apperror.NotFound. Each layer
+		// matches on its own vocabulary.
+		return repoError{
+			sentinel: ErrNotFound,
+			cause:    apperror.NotFound(resource),
+		}
 	}
 
 	// Context errors must propagate unwrapped. The timeout middleware and
@@ -71,11 +109,20 @@ func translateError(err error, resource string) error {
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
 		case pgUniqueViolation:
-			return apperror.Conflict("a record with the same unique value already exists")
+			return repoError{
+				sentinel: ErrConflict,
+				cause:    apperror.Conflict("a record with the same unique value already exists"),
+			}
 		case pgForeignKeyViolation:
-			return apperror.Conflict("the request references a record that does not exist or is still in use")
+			return repoError{
+				sentinel: ErrConflict,
+				cause:    apperror.Conflict("the request references a record that does not exist or is still in use"),
+			}
 		case pgCheckViolation, pgNotNullViolation:
-			return apperror.BadRequest("the request violates a database constraint")
+			return repoError{
+				sentinel: ErrConstraintViolation,
+				cause:    apperror.BadRequest("the request violates a database constraint"),
+			}
 		}
 	}
 
@@ -83,4 +130,39 @@ func translateError(err error, resource string) error {
 	// the cause for server-side logging while presenting a generic
 	// message to the client.
 	return apperror.Internal(err)
+}
+
+// repoError carries both a repository sentinel (for the service's
+// errors.Is checks) and an apperror (for the handler's respondError).
+// Its Error() formats the sentinel + cause for legible logs; Unwrap
+// returns the cause so errors.As(apperror.Error) finds the apperror.
+// Is matches the sentinel so errors.Is(repository.ErrX) returns true.
+//
+// This dual-tagging is the cleanest replacement for the Phase 4-8
+// string-matching: each layer matches on its own vocabulary, no layer
+// has to know the other's vocabulary, and the underlying cause is
+// preserved for diagnostics.
+type repoError struct {
+	sentinel error
+	cause    error
+}
+
+func (e repoError) Error() string {
+	if e.cause == nil {
+		return e.sentinel.Error()
+	}
+	return fmt.Sprintf("%s: %s", e.sentinel.Error(), e.cause.Error())
+}
+
+// Is matches the sentinel — repository.ErrNotFound etc. The service's
+// `errors.Is(err, repository.ErrNotFound)` returns true via this.
+func (e repoError) Is(target error) bool {
+	return e.sentinel == target
+}
+
+// Unwrap returns the apperror cause so the handler's `errors.As(err,
+// &apperror.Error{...})` still finds it. This is what keeps the
+// apperror-based HTTP mapping working without changes.
+func (e repoError) Unwrap() error {
+	return e.cause
 }
