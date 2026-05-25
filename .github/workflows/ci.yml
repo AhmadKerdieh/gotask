@@ -39,9 +39,13 @@ jobs:
       - name: staticcheck
         # staticcheck is the de facto Go community linter — stricter
         # than vet, much less noisy than the alternatives. Run via
-        # `go run` so we get a pinned version without separate setup.
+        # `go install` so we get a pinned version without separate setup.
+        # 2025.1.1 is pinned because earlier releases (2024.x) pull in
+        # a golang.org/x/tools that uses a constant expression Go 1.26+
+        # correctly rejects. Bump this in lockstep with the project's
+        # minimum Go version.
         run: |
-          go install honnef.co/go/tools/cmd/staticcheck@2024.1.1
+          go install honnef.co/go/tools/cmd/staticcheck@2025.1.1
           staticcheck ./...
 
   # ── Unit tests: fast, no DB ──────────────────────────────────────

@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -85,10 +84,3 @@ func Metrics(next http.Handler) http.Handler {
 		metrics.HTTPRequestsTotal.WithLabelValues(route, method, status).Inc()
 	})
 }
-
-// statusToString is unused here but kept as a utility for any future
-// metric that wants the raw code as a label. We deliberately do NOT
-// expose it as a label by default — see the cardinality note in
-// internal/metrics. If you ever decide the granularity is worth the
-// 20-cardinality cost, this is the helper to reach for.
-func statusToString(code int) string { return strconv.Itoa(code) }

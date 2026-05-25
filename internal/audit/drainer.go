@@ -3,7 +3,6 @@ package audit
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -343,14 +342,6 @@ func (d *Drainer) drainOnce(ctx context.Context) {
 // pgconn doesn't break callers silently. (Tag is unused locally; this
 // is documentation by way of compilation.)
 var _ pgconn.CommandTag = pgconn.CommandTag{}
-
-// drainerError is reserved for future typed errors the drainer might
-// expose to callers. Today the drainer logs and swallows; if/when an
-// outer caller wants to react to drainer health, this stub is where
-// the typed surface lands.
-type drainerError struct{ msg string }
-
-func (e *drainerError) Error() string { return fmt.Sprintf("drainer: %s", e.msg) }
 
 // Ensure database.Queryer is satisfied by *pgxpool.Pool — drainOnce
 // uses tx directly, but the assertion keeps the file honest about its
